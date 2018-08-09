@@ -13,22 +13,23 @@
 // This test is for *-windows-msvc only.
 // ignore-android
 // ignore-bitrig
-// ignore-macos
+// ignore-cloudabi
 // ignore-dragonfly
+// ignore-emscripten
 // ignore-freebsd
 // ignore-haiku
 // ignore-ios
 // ignore-linux
+// ignore-macos
 // ignore-netbsd
 // ignore-openbsd
 // ignore-solaris
-// ignore-emscripten
 
 // compile-flags: -C no-prepopulate-passes -C panic=abort -O
 
 #![crate_type = "lib"]
 
-// CHECK: Function Attrs: uwtable
+// CHECK: Function Attrs: nounwind uwtable
 // CHECK-NEXT: define void @normal_uwtable()
 #[no_mangle]
 pub fn normal_uwtable() {

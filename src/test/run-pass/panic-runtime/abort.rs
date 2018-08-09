@@ -10,7 +10,9 @@
 
 // compile-flags:-C panic=abort
 // no-prefer-dynamic
-// ignore-emscripten Function not implemented.
+// ignore-cloudabi no processes
+// ignore-emscripten no processes
+// ignore-macos
 
 use std::process::Command;
 use std::env;

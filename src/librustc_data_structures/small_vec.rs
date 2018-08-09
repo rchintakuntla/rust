@@ -50,6 +50,10 @@ impl<A: Array> SmallVec<A> {
         SmallVec(AccumulateVec::new())
     }
 
+    pub fn is_array(&self) -> bool {
+        self.0.is_array()
+    }
+
     pub fn with_capacity(cap: usize) -> Self {
         let mut vec = SmallVec::new();
         vec.reserve(cap);
@@ -167,8 +171,9 @@ impl<A: Array> Extend<A::Element> for SmallVec<A> {
     fn extend<I: IntoIterator<Item=A::Element>>(&mut self, iter: I) {
         let iter = iter.into_iter();
         self.reserve(iter.size_hint().0);
-        for el in iter {
-            self.push(el);
+        match self.0 {
+            AccumulateVec::Heap(ref mut vec) => vec.extend(iter),
+            _ => iter.for_each(|el| self.push(el))
         }
     }
 }
@@ -193,7 +198,7 @@ impl<A> Encodable for SmallVec<A>
     fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
         s.emit_seq(self.len(), |s| {
             for (i, e) in self.iter().enumerate() {
-                try!(s.emit_seq_elt(i, |s| e.encode(s)));
+                s.emit_seq_elt(i, |s| e.encode(s))?;
             }
             Ok(())
         })
@@ -205,11 +210,123 @@ impl<A> Decodable for SmallVec<A>
           A::Element: Decodable {
     fn decode<D: Decoder>(d: &mut D) -> Result<SmallVec<A>, D::Error> {
         d.read_seq(|d, len| {
-            let mut vec = SmallVec::with_capacity(len);
-            for i in 0..len {
-                vec.push(try!(d.read_seq_elt(i, |d| Decodable::decode(d))));
-            }
-            Ok(vec)
+            (0..len).map(|i| d.read_seq_elt(i, |d| Decodable::decode(d))).collect()
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate test;
+    use self::test::Bencher;
+
+    use super::*;
+
+    #[bench]
+    fn fill_small_vec_1_10_with_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 1]> = SmallVec::with_capacity(10);
+
+            sv.extend(0..10);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_1_10_wo_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 1]> = SmallVec::new();
+
+            sv.extend(0..10);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_8_10_with_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 8]> = SmallVec::with_capacity(10);
+
+            sv.extend(0..10);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_8_10_wo_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 8]> = SmallVec::new();
+
+            sv.extend(0..10);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_32_10_with_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 32]> = SmallVec::with_capacity(10);
+
+            sv.extend(0..10);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_32_10_wo_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 32]> = SmallVec::new();
+
+            sv.extend(0..10);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_1_50_with_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 1]> = SmallVec::with_capacity(50);
+
+            sv.extend(0..50);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_1_50_wo_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 1]> = SmallVec::new();
+
+            sv.extend(0..50);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_8_50_with_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 8]> = SmallVec::with_capacity(50);
+
+            sv.extend(0..50);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_8_50_wo_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 8]> = SmallVec::new();
+
+            sv.extend(0..50);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_32_50_with_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 32]> = SmallVec::with_capacity(50);
+
+            sv.extend(0..50);
+        })
+    }
+
+    #[bench]
+    fn fill_small_vec_32_50_wo_cap(b: &mut Bencher) {
+        b.iter(|| {
+            let mut sv: SmallVec<[usize; 32]> = SmallVec::new();
+
+            sv.extend(0..50);
         })
     }
 }

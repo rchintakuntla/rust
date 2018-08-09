@@ -17,8 +17,6 @@
 // changes were caught. However, those uses in the compiler could
 // easily get changed or refactored away in the future.
 
-
-#![allow(unknown_features)]
 #![feature(box_syntax)]
 
 struct Ctxt<'tcx> {
@@ -42,7 +40,7 @@ impl<'a,'tcx> Foo<'a,'tcx> {
             // inferring `'_2` to be `'static` in this case, because
             // it is created outside the closure but then related to
             // regions bound by the closure itself. See the
-            // `region_inference.rs` file (and the `givens` field, in
+            // `region_constraints.rs` file (and the `givens` field, in
             // particular) for more details.
             this.foo()
         }))

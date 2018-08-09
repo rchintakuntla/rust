@@ -10,6 +10,7 @@
 
 // ignore-windows failing on win32 bot
 // ignore-freebsd: gdb package too new
+// ignore-test // Test temporarily ignored due to debuginfo tests being disabled, see PR 47155
 // ignore-android: FIXME(#10381)
 // compile-flags:-g
 // min-gdb-version 7.7
@@ -43,6 +44,10 @@
 
 // gdb-command: print some_string
 // gdb-check:$8 = Some = {"IAMA optional string!"}
+
+// gdb-command: set print length 5
+// gdb-command: print some_string
+// gdb-check:$8 = Some = {"IAMA "...}
 
 
 // === LLDB TESTS ==================================================================================

@@ -30,10 +30,11 @@ doctest = false
 core = { path = "../../libcore" }
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.0.1"
 
 [features]
 c = []
 default = ["c", "rustbuild", "compiler-builtins"]
+mem = []
 rustbuild = []
 compiler-builtins = []

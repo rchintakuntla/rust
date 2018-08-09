@@ -25,11 +25,15 @@
 //!
 //! Fatal logic errors in Rust cause *thread panic*, during which
 //! a thread will unwind the stack, running destructors and freeing
-//! owned resources. Thread panic is unrecoverable from within
-//! the panicking thread (i.e. there is no 'try/catch' in Rust), but
-//! the panic may optionally be detected from a different thread. If
-//! the main thread panics, the application will exit with a non-zero
-//! exit code.
+//! owned resources. While not meant as a 'try/catch' mechanism, panics
+//! in Rust can nonetheless be caught (unless compiling with `panic=abort`) with
+//! [`catch_unwind`](../../std/panic/fn.catch_unwind.html) and recovered
+//! from, or alternatively be resumed with
+//! [`resume_unwind`](../../std/panic/fn.resume_unwind.html). If the panic
+//! is not caught the thread will exit, but the panic may optionally be
+//! detected from a different thread with [`join`]. If the main thread panics
+//! without the panic being caught, the application will exit with a
+//! non-zero exit code.
 //!
 //! When the main thread of a Rust program terminates, the entire program shuts
 //! down, even if other threads are still running. However, this module provides
@@ -171,6 +175,8 @@ use panic;
 use panicking;
 use str;
 use sync::{Mutex, Condvar, Arc};
+use sync::atomic::AtomicUsize;
+use sync::atomic::Ordering::SeqCst;
 use sys::thread as imp;
 use sys_common::mutex;
 use sys_common::thread_info;
@@ -185,7 +191,7 @@ use time::Duration;
 #[macro_use] mod local;
 
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use self::local::{LocalKey, LocalKeyState, AccessError};
+pub use self::local::{LocalKey, AccessError};
 
 // The types used by the thread_local! macro to access TLS keys. Note that there
 // are two types, the "OS" type and the "fast" type. The OS thread local key
@@ -196,6 +202,9 @@ pub use self::local::{LocalKey, LocalKeyState, AccessError};
 // where fast TLS was not available; end-user code is compiled with fast TLS
 // where available, but both are needed.
 
+#[unstable(feature = "libstd_thread_internals", issue = "0")]
+#[cfg(target_arch = "wasm32")]
+#[doc(hidden)] pub use self::local::statik::Key as __StaticLocalKeyInner;
 #[unstable(feature = "libstd_thread_internals", issue = "0")]
 #[cfg(target_thread_local)]
 #[doc(hidden)] pub use self::local::fast::Key as __FastLocalKeyInner;
@@ -646,7 +655,7 @@ pub fn panicking() -> bool {
 /// The thread may sleep longer than the duration specified due to scheduling
 /// specifics or platform-dependent functionality.
 ///
-/// # Platform behavior
+/// # Platform-specific behavior
 ///
 /// On Unix platforms this function will not return early due to a
 /// signal being received or a spurious wakeup.
@@ -670,7 +679,7 @@ pub fn sleep_ms(ms: u32) {
 /// The thread may sleep longer than the duration specified due to scheduling
 /// specifics or platform-dependent functionality.
 ///
-/// # Platform behavior
+/// # Platform-specific behavior
 ///
 /// On Unix platforms this function will not return early due to a
 /// signal being received or a spurious wakeup. Platforms which do not support
@@ -693,6 +702,11 @@ pub fn sleep_ms(ms: u32) {
 pub fn sleep(dur: Duration) {
     imp::Thread::sleep(dur)
 }
+
+// constants for park/unpark
+const EMPTY: usize = 0;
+const PARKED: usize = 1;
+const NOTIFIED: usize = 2;
 
 /// Blocks unless or until the current thread's token is made available.
 ///
@@ -717,7 +731,8 @@ pub fn sleep(dur: Duration) {
 ///   specifying a maximum time to block the thread for.
 ///
 /// * The [`unpark`] method on a [`Thread`] atomically makes the token available
-///   if it wasn't already.
+///   if it wasn't already. Because the token is initially absent, [`unpark`]
+///   followed by [`park`] will result in the second call returning immediately.
 ///
 /// In other words, each [`Thread`] acts a bit like a spinlock that can be
 /// locked and unlocked using `park` and `unpark`.
@@ -752,6 +767,8 @@ pub fn sleep(dur: Duration) {
 /// // Let some time pass for the thread to be spawned.
 /// thread::sleep(Duration::from_millis(10));
 ///
+/// // There is no race condition here, if `unpark`
+/// // happens first, `park` will return immediately.
 /// println!("Unpark the thread");
 /// parked_thread.thread().unpark();
 ///
@@ -771,11 +788,30 @@ pub fn sleep(dur: Duration) {
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn park() {
     let thread = current();
-    let mut guard = thread.inner.lock.lock().unwrap();
-    while !*guard {
-        guard = thread.inner.cvar.wait(guard).unwrap();
+
+    // If we were previously notified then we consume this notification and
+    // return quickly.
+    if thread.inner.state.compare_exchange(NOTIFIED, EMPTY, SeqCst, SeqCst).is_ok() {
+        return
     }
-    *guard = false;
+
+    // Otherwise we need to coordinate going to sleep
+    let mut m = thread.inner.lock.lock().unwrap();
+    match thread.inner.state.compare_exchange(EMPTY, PARKED, SeqCst, SeqCst) {
+        Ok(_) => {}
+        Err(NOTIFIED) => {
+            thread.inner.state.store(EMPTY, SeqCst);
+            return;
+        } // should consume this notification, so prohibit spurious wakeups in next park.
+        Err(_) => panic!("inconsistent park state"),
+    }
+    loop {
+        m = thread.inner.cvar.wait(m).unwrap();
+        match thread.inner.state.compare_exchange(NOTIFIED, EMPTY, SeqCst, SeqCst) {
+            Ok(_) => return, // got a notification
+            Err(_) => {} // spurious wakeup, go back to sleep
+        }
+    }
 }
 
 /// Use [`park_timeout`].
@@ -810,7 +846,7 @@ pub fn park_timeout_ms(ms: u32) {
 ///
 /// See the [park documentation][park] for more details.
 ///
-/// # Platform behavior
+/// # Platform-specific behavior
 ///
 /// Platforms which do not support nanosecond precision for sleeping will have
 /// `dur` rounded up to the nearest granularity of time they can sleep for.
@@ -842,12 +878,33 @@ pub fn park_timeout_ms(ms: u32) {
 #[stable(feature = "park_timeout", since = "1.4.0")]
 pub fn park_timeout(dur: Duration) {
     let thread = current();
-    let mut guard = thread.inner.lock.lock().unwrap();
-    if !*guard {
-        let (g, _) = thread.inner.cvar.wait_timeout(guard, dur).unwrap();
-        guard = g;
+
+    // Like `park` above we have a fast path for an already-notified thread, and
+    // afterwards we start coordinating for a sleep.
+    // return quickly.
+    if thread.inner.state.compare_exchange(NOTIFIED, EMPTY, SeqCst, SeqCst).is_ok() {
+        return
     }
-    *guard = false;
+    let m = thread.inner.lock.lock().unwrap();
+    match thread.inner.state.compare_exchange(EMPTY, PARKED, SeqCst, SeqCst) {
+        Ok(_) => {}
+        Err(NOTIFIED) => {
+            thread.inner.state.store(EMPTY, SeqCst);
+            return;
+        } // should consume this notification, so prohibit spurious wakeups in next park.
+        Err(_) => panic!("inconsistent park_timeout state"),
+    }
+
+    // Wait with a timeout, and if we spuriously wake up or otherwise wake up
+    // from a notification we just want to unconditionally set the state back to
+    // empty, either consuming a notification or un-flagging ourselves as
+    // parked.
+    let (_m, _result) = thread.inner.cvar.wait_timeout(m, dur).unwrap();
+    match thread.inner.state.swap(EMPTY, SeqCst) {
+        NOTIFIED => {} // got a notification, hurray!
+        PARKED => {} // no notification, alas
+        n => panic!("inconsistent park_timeout state: {}", n),
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -883,23 +940,22 @@ pub struct ThreadId(u64);
 impl ThreadId {
     // Generate a new unique thread ID.
     fn new() -> ThreadId {
+        // We never call `GUARD.init()`, so it is UB to attempt to
+        // acquire this mutex reentrantly!
         static GUARD: mutex::Mutex = mutex::Mutex::new();
         static mut COUNTER: u64 = 0;
 
         unsafe {
-            GUARD.lock();
+            let _guard = GUARD.lock();
 
             // If we somehow use up all our bits, panic so that we're not
             // covering up subtle bugs of IDs being reused.
             if COUNTER == ::u64::MAX {
-                GUARD.unlock();
                 panic!("failed to generate unique thread ID: bitspace exhausted");
             }
 
             let id = COUNTER;
             COUNTER += 1;
-
-            GUARD.unlock();
 
             ThreadId(id)
         }
@@ -914,7 +970,10 @@ impl ThreadId {
 struct Inner {
     name: Option<CString>,      // Guaranteed to be UTF-8
     id: ThreadId,
-    lock: Mutex<bool>,          // true when there is a buffered unpark
+
+    // state for thread park/unpark
+    state: AtomicUsize,
+    lock: Mutex<()>,
     cvar: Condvar,
 }
 
@@ -958,7 +1017,8 @@ impl Thread {
             inner: Arc::new(Inner {
                 name: cname,
                 id: ThreadId::new(),
-                lock: Mutex::new(false),
+                state: AtomicUsize::new(EMPTY),
+                lock: Mutex::new(()),
                 cvar: Condvar::new(),
             })
         }
@@ -998,10 +1058,22 @@ impl Thread {
     /// [park]: fn.park.html
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn unpark(&self) {
-        let mut guard = self.inner.lock.lock().unwrap();
-        if !*guard {
-            *guard = true;
-            self.inner.cvar.notify_one();
+        loop {
+            match self.inner.state.compare_exchange(EMPTY, NOTIFIED, SeqCst, SeqCst) {
+                Ok(_) => return, // no one was waiting
+                Err(NOTIFIED) => return, // already unparked
+                Err(PARKED) => {} // gotta go wake someone up
+                _ => panic!("inconsistent state in unpark"),
+            }
+
+            // Coordinate wakeup through the mutex and a condvar notification
+            let _lock = self.inner.lock.lock().unwrap();
+            match self.inner.state.compare_exchange(PARKED, NOTIFIED, SeqCst, SeqCst) {
+                Ok(_) => return self.inner.cvar.notify_one(),
+                Err(NOTIFIED) => return, // a different thread unparked
+                Err(EMPTY) => {} // parked thread went away, try again
+                _ => panic!("inconsistent state in unpark"),
+            }
         }
     }
 
@@ -1108,7 +1180,7 @@ impl fmt::Debug for Thread {
 ///
 /// [`Result`]: ../../std/result/enum.Result.html
 #[stable(feature = "rust1", since = "1.0.0")]
-pub type Result<T> = ::result::Result<T, Box<Any + Send + 'static>>;
+pub type Result<T> = ::result::Result<T, Box<dyn Any + Send + 'static>>;
 
 // This packet is used to communicate the return value between the child thread
 // and the parent thread. Memory is shared through the `Arc` within and there's
@@ -1208,6 +1280,11 @@ impl<T> JoinInner<T> {
 /// [`thread::Builder::spawn`]: struct.Builder.html#method.spawn
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct JoinHandle<T>(JoinInner<T>);
+
+#[stable(feature = "joinhandle_impl_send_sync", since = "1.29.0")]
+unsafe impl<T> Send for JoinHandle<T> {}
+#[stable(feature = "joinhandle_impl_send_sync", since = "1.29.0")]
+unsafe impl<T> Sync for JoinHandle<T> {}
 
 impl<T> JoinHandle<T> {
     /// Extracts a handle to the underlying thread.
@@ -1371,7 +1448,7 @@ mod tests {
         rx.recv().unwrap();
     }
 
-    fn avoid_copying_the_body<F>(spawnfn: F) where F: FnOnce(Box<Fn() + Send>) {
+    fn avoid_copying_the_body<F>(spawnfn: F) where F: FnOnce(Box<dyn Fn() + Send>) {
         let (tx, rx) = channel();
 
         let x: Box<_> = box 1;
@@ -1418,7 +1495,7 @@ mod tests {
         // (well, it would if the constant were 8000+ - I lowered it to be more
         // valgrind-friendly. try this at home, instead..!)
         const GENERATIONS: u32 = 16;
-        fn child_no(x: u32) -> Box<Fn() + Send> {
+        fn child_no(x: u32) -> Box<dyn Fn() + Send> {
             return Box::new(move|| {
                 if x < GENERATIONS {
                     thread::spawn(move|| child_no(x+1)());
@@ -1464,10 +1541,10 @@ mod tests {
     #[test]
     fn test_try_panic_message_any() {
         match thread::spawn(move|| {
-            panic!(box 413u16 as Box<Any + Send>);
+            panic!(box 413u16 as Box<dyn Any + Send>);
         }).join() {
             Err(e) => {
-                type T = Box<Any + Send>;
+                type T = Box<dyn Any + Send>;
                 assert!(e.is::<T>());
                 let any = e.downcast::<T>().unwrap();
                 assert!(any.is::<u16>());

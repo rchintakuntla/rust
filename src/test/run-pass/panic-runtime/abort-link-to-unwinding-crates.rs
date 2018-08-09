@@ -11,7 +11,9 @@
 // compile-flags:-C panic=abort
 // aux-build:exit-success-if-unwind.rs
 // no-prefer-dynamic
-// ignore-emscripten Function not implemented
+// ignore-cloudabi no processes
+// ignore-emscripten no processes
+// ignore-macos
 
 extern crate exit_success_if_unwind;
 

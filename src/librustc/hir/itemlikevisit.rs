@@ -41,7 +41,7 @@ use super::intravisit::Visitor;
 ///    - Example: Lifetime resolution, which wants to bring lifetimes declared on the
 ///      impl into scope while visiting the impl-items, and then back out again.
 ///    - How: Implement `intravisit::Visitor` and override the
-///      `visit_nested_map()` methods to return
+///      `nested_visit_map()` methods to return
 ///      `NestedVisitorMap::All`. Walk your crate with
 ///      `intravisit::walk_crate()` invoked on `tcx.hir.krate()`.
 ///    - Pro: Visitor methods for any kind of HIR node, not just item-like things.
@@ -86,5 +86,35 @@ impl<'v, 'hir, V> ItemLikeVisitor<'hir> for DeepVisitor<'v, V>
 
     fn visit_impl_item(&mut self, impl_item: &'hir ImplItem) {
         self.visitor.visit_impl_item(impl_item);
+    }
+}
+
+/// A parallel variant of ItemLikeVisitor
+pub trait ParItemLikeVisitor<'hir> {
+    fn visit_item(&self, item: &'hir Item);
+    fn visit_trait_item(&self, trait_item: &'hir TraitItem);
+    fn visit_impl_item(&self, impl_item: &'hir ImplItem);
+}
+
+pub trait IntoVisitor<'hir> {
+    type Visitor: Visitor<'hir>;
+    fn into_visitor(&self) -> Self::Visitor;
+}
+
+pub struct ParDeepVisitor<V>(pub V);
+
+impl<'hir, V> ParItemLikeVisitor<'hir> for ParDeepVisitor<V>
+    where V: IntoVisitor<'hir>
+{
+    fn visit_item(&self, item: &'hir Item) {
+        self.0.into_visitor().visit_item(item);
+    }
+
+    fn visit_trait_item(&self, trait_item: &'hir TraitItem) {
+        self.0.into_visitor().visit_trait_item(trait_item);
+    }
+
+    fn visit_impl_item(&self, impl_item: &'hir ImplItem) {
+        self.0.into_visitor().visit_impl_item(impl_item);
     }
 }

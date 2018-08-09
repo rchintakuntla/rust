@@ -16,7 +16,7 @@ extern crate cc;
 use std::env;
 use std::path::PathBuf;
 use std::process::Command;
-use build_helper::{run, native_lib_boilerplate, BuildExpectation};
+use build_helper::{run, native_lib_boilerplate};
 
 fn main() {
     // FIXME: This is a hack to support building targets that don't
@@ -29,10 +29,17 @@ fn main() {
     // for targets like emscripten, even if we don't use it.
     let target = env::var("TARGET").expect("TARGET was not set");
     let host = env::var("HOST").expect("HOST was not set");
-    if target.contains("rumprun") || target.contains("bitrig") || target.contains("openbsd") ||
-       target.contains("msvc") || target.contains("emscripten") || target.contains("fuchsia") ||
-       target.contains("redox") {
+    if target.contains("bitrig") || target.contains("emscripten") || target.contains("fuchsia") ||
+       target.contains("msvc") || target.contains("openbsd") || target.contains("redox") ||
+       target.contains("rumprun") || target.contains("wasm32") {
         println!("cargo:rustc-cfg=dummy_jemalloc");
+        return;
+    }
+
+    // CloudABI ships with a copy of jemalloc that has been patched to
+    // work well with sandboxing. Don't attempt to build our own copy,
+    // as it won't build.
+    if target.contains("cloudabi") {
         return;
     }
 
@@ -63,15 +70,6 @@ fn main() {
         _ => return,
     };
 
-    let compiler = cc::Build::new().get_compiler();
-    // only msvc returns None for ar so unwrap is okay
-    let ar = build_helper::cc2ar(compiler.path(), &target).unwrap();
-    let cflags = compiler.args()
-        .iter()
-        .map(|s| s.to_str().unwrap())
-        .collect::<Vec<_>>()
-        .join(" ");
-
     let mut cmd = Command::new("sh");
     cmd.arg(native.src_dir.join("configure")
                           .to_str()
@@ -79,8 +77,6 @@ fn main() {
                           .replace("C:\\", "/c/")
                           .replace("\\", "/"))
        .current_dir(&native.out_dir)
-       .env("CC", compiler.path())
-       .env("EXTRA_CFLAGS", cflags.clone())
        // jemalloc generates Makefile deps using GCC's "-MM" flag. This means
        // that GCC will run the preprocessor, and only the preprocessor, over
        // jemalloc's source files. If we don't specify CPPFLAGS, then at least
@@ -89,9 +85,7 @@ fn main() {
        // passed to GCC, and then GCC won't define the
        // "__GCC_HAVE_SYNC_COMPARE_AND_SWAP_4" macro that jemalloc needs to
        // select an atomic operation implementation.
-       .env("CPPFLAGS", cflags.clone())
-       .env("AR", &ar)
-       .env("RANLIB", format!("{} s", ar.display()));
+       .env("CPPFLAGS", env::var_os("CFLAGS").unwrap_or_default());
 
     if target.contains("ios") {
         cmd.arg("--disable-tls");
@@ -111,11 +105,10 @@ fn main() {
         cmd.arg("--with-jemalloc-prefix=je_");
     }
 
-    // FIXME: building with jemalloc assertions is currently broken.
-    // See <https://github.com/rust-lang/rust/issues/44152>.
-    //if cfg!(feature = "debug") {
-    //    cmd.arg("--enable-debug");
-    //}
+    if cfg!(feature = "debug") {
+        // Enable jemalloc assertions.
+        cmd.arg("--enable-debug");
+    }
 
     cmd.arg(format!("--host={}", build_helper::gnu_target(&target)));
     cmd.arg(format!("--build={}", build_helper::gnu_target(&host)));
@@ -126,7 +119,7 @@ fn main() {
         cmd.arg("--with-lg-quantum=4");
     }
 
-    run(&mut cmd, BuildExpectation::None);
+    run(&mut cmd);
 
     let mut make = Command::new(build_helper::make(&host));
     make.current_dir(&native.out_dir)
@@ -143,7 +136,7 @@ fn main() {
             .arg(env::var("NUM_JOBS").expect("NUM_JOBS was not set"));
     }
 
-    run(&mut make, BuildExpectation::None);
+    run(&mut make);
 
     // The pthread_atfork symbols is used by jemalloc on android but the really
     // old android we're building on doesn't have them defined, so just make
@@ -153,6 +146,6 @@ fn main() {
         cc::Build::new()
             .flag("-fvisibility=hidden")
             .file("pthread_atfork_dummy.c")
-            .compile("libpthread_atfork_dummy.a");
+            .compile("pthread_atfork_dummy");
     }
 }

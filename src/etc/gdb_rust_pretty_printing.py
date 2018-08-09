@@ -124,6 +124,9 @@ def rust_pretty_printer_lookup_function(gdb_val):
     if type_kind == rustpp.TYPE_KIND_STD_VEC:
         return RustStdVecPrinter(val)
 
+    if type_kind == rustpp.TYPE_KIND_STD_VECDEQUE:
+        return RustStdVecDequePrinter(val)
+
     if type_kind == rustpp.TYPE_KIND_STD_STRING:
         return RustStdStringPrinter(val)
 
@@ -248,7 +251,10 @@ class RustStringSlicePrinter(object):
     def to_string(self):
         (length, data_ptr) = rustpp.extract_length_and_ptr_from_slice(self.__val)
         raw_ptr = data_ptr.get_wrapped_value()
-        return '"%s"' % raw_ptr.string(encoding="utf-8", length=length)
+        return raw_ptr.lazy_string(encoding="utf-8", length=length)
+
+    def display_hint(self):
+        return "string"
 
 
 class RustStdVecPrinter(object):
@@ -271,6 +277,28 @@ class RustStdVecPrinter(object):
             yield (str(index), (gdb_ptr + index).dereference())
 
 
+class RustStdVecDequePrinter(object):
+    def __init__(self, val):
+        self.__val = val
+
+    @staticmethod
+    def display_hint():
+        return "array"
+
+    def to_string(self):
+        (tail, head, data_ptr, cap) = \
+            rustpp.extract_tail_head_ptr_and_cap_from_std_vecdeque(self.__val)
+        return (self.__val.type.get_unqualified_type_name() +
+                ("(len: %i, cap: %i)" % (head - tail, cap)))
+
+    def children(self):
+        (tail, head, data_ptr, cap) = \
+            rustpp.extract_tail_head_ptr_and_cap_from_std_vecdeque(self.__val)
+        gdb_ptr = data_ptr.get_wrapped_value()
+        for index in xrange(tail, head):
+            yield (str(index), (gdb_ptr + index).dereference())
+
+
 class RustStdStringPrinter(object):
     def __init__(self, val):
         self.__val = val
@@ -278,9 +306,11 @@ class RustStdStringPrinter(object):
     def to_string(self):
         vec = self.__val.get_child_at_index(0)
         (length, data_ptr, cap) = rustpp.extract_length_ptr_and_cap_from_std_vec(vec)
-        return '"%s"' % data_ptr.get_wrapped_value().string(encoding="utf-8",
-                                                            length=length)
+        return data_ptr.get_wrapped_value().lazy_string(encoding="utf-8",
+                                                        length=length)
 
+    def display_hint(self):
+        return "string"
 
 class RustOsStringPrinter(object):
     def __init__(self, val):
@@ -294,8 +324,10 @@ class RustOsStringPrinter(object):
 
         (length, data_ptr, cap) = rustpp.extract_length_ptr_and_cap_from_std_vec(
             vec)
-        return '"%s"' % data_ptr.get_wrapped_value().string(length=length)
+        return data_ptr.get_wrapped_value().lazy_string(length=length)
 
+    def display_hint(self):
+        return "string"
 
 class RustCStyleVariantPrinter(object):
     def __init__(self, val):

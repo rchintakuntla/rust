@@ -1,0 +1,18 @@
+warning: not reporting region error due to nll
+  --> $DIR/region-lbr1-does-not-outlive-ebr2.rs:19:5
+   |
+LL |     &*x
+   |     ^^^
+
+error: unsatisfied lifetime constraints
+  --> $DIR/region-lbr1-does-not-outlive-ebr2.rs:19:5
+   |
+LL | fn foo<'a, 'b>(x: &'a u32, y: &'b u32) -> &'b u32 {
+   |        --  -- lifetime `'b` defined here
+   |        |
+   |        lifetime `'a` defined here
+LL |     &*x
+   |     ^^^ requires that `'a` must outlive `'b`
+
+error: aborting due to previous error
+

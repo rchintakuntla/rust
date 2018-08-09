@@ -11,18 +11,16 @@
 #![allow(unused_variables)]
 #![allow(non_camel_case_types)]
 #![deny(dead_code)]
-#![feature(libc)]
 
 #![crate_type="lib"]
 
-extern crate libc;
 
 pub use extern_foo as x;
 extern {
     pub fn extern_foo();
 }
 
-struct Foo; //~ ERROR: struct is never used
+struct Foo; //~ ERROR: struct is never constructed
 impl Foo {
     fn foo(&self) { //~ ERROR: method is never used
         bar()
@@ -54,14 +52,13 @@ pub fn pub_fn() {
 }
 
 mod blah {
-    use libc::size_t;
     // not warned because it's used in the parameter of `free` and return of
     // `malloc` below, which are also used.
     enum c_void {}
 
     extern {
         fn free(p: *const c_void);
-        fn malloc(size: size_t) -> *const c_void;
+        fn malloc(size: usize) -> *const c_void;
     }
 
     pub fn baz() {

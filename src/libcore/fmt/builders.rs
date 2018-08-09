@@ -10,25 +10,29 @@
 
 use fmt;
 
-struct PadAdapter<'a, 'b: 'a> {
-    fmt: &'a mut fmt::Formatter<'b>,
+struct PadAdapter<'a> {
+    buf: &'a mut (dyn fmt::Write + 'a),
     on_newline: bool,
 }
 
-impl<'a, 'b: 'a> PadAdapter<'a, 'b> {
-    fn new(fmt: &'a mut fmt::Formatter<'b>) -> PadAdapter<'a, 'b> {
-        PadAdapter {
-            fmt,
-            on_newline: false,
-        }
+impl<'a> PadAdapter<'a> {
+    fn wrap<'b, 'c: 'a+'b>(fmt: &'c mut fmt::Formatter, slot: &'b mut Option<Self>)
+                        -> fmt::Formatter<'b> {
+        fmt.wrap_buf(move |buf| {
+            *slot = Some(PadAdapter {
+                buf,
+                on_newline: false,
+            });
+            slot.as_mut().unwrap()
+        })
     }
 }
 
-impl<'a, 'b: 'a> fmt::Write for PadAdapter<'a, 'b> {
+impl<'a> fmt::Write for PadAdapter<'a> {
     fn write_str(&mut self, mut s: &str) -> fmt::Result {
         while !s.is_empty() {
             if self.on_newline {
-                self.fmt.write_str("    ")?;
+                self.buf.write_str("    ")?;
             }
 
             let split = match s.find('\n') {
@@ -41,7 +45,7 @@ impl<'a, 'b: 'a> fmt::Write for PadAdapter<'a, 'b> {
                     s.len()
                 }
             };
-            self.fmt.write_str(&s[..split])?;
+            self.buf.write_str(&s[..split])?;
             s = &s[split..];
         }
 
@@ -80,7 +84,7 @@ impl<'a, 'b: 'a> fmt::Write for PadAdapter<'a, 'b> {
 /// // prints "Foo { bar: 10, baz: "Hello World" }"
 /// println!("{:?}", Foo { bar: 10, baz: "Hello World".to_string() });
 /// ```
-#[must_use]
+#[must_use = "must eventually call `finish()` on Debug builders"]
 #[allow(missing_debug_implementations)]
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub struct DebugStruct<'a, 'b: 'a> {
@@ -103,7 +107,7 @@ pub fn debug_struct_new<'a, 'b>(fmt: &'a mut fmt::Formatter<'b>,
 impl<'a, 'b: 'a> DebugStruct<'a, 'b> {
     /// Adds a new field to the generated struct output.
     #[stable(feature = "debug_builders", since = "1.2.0")]
-    pub fn field(&mut self, name: &str, value: &fmt::Debug) -> &mut DebugStruct<'a, 'b> {
+    pub fn field(&mut self, name: &str, value: &dyn fmt::Debug) -> &mut DebugStruct<'a, 'b> {
         self.result = self.result.and_then(|_| {
             let prefix = if self.has_fields {
                 ","
@@ -112,11 +116,16 @@ impl<'a, 'b: 'a> DebugStruct<'a, 'b> {
             };
 
             if self.is_pretty() {
-                let mut writer = PadAdapter::new(self.fmt);
-                fmt::write(&mut writer,
-                           format_args!("{}\n{}: {:#?}", prefix, name, value))
+                let mut slot = None;
+                let mut writer = PadAdapter::wrap(&mut self.fmt, &mut slot);
+                writer.write_str(prefix)?;
+                writer.write_str("\n")?;
+                writer.write_str(name)?;
+                writer.write_str(": ")?;
+                value.fmt(&mut writer)
             } else {
-                write!(self.fmt, "{} {}: {:?}", prefix, name, value)
+                write!(self.fmt, "{} {}: ", prefix, name)?;
+                value.fmt(self.fmt)
             }
         });
 
@@ -172,7 +181,7 @@ impl<'a, 'b: 'a> DebugStruct<'a, 'b> {
 /// // prints "Foo(10, "Hello World")"
 /// println!("{:?}", Foo(10, "Hello World".to_string()));
 /// ```
-#[must_use]
+#[must_use = "must eventually call `finish()` on Debug builders"]
 #[allow(missing_debug_implementations)]
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub struct DebugTuple<'a, 'b: 'a> {
@@ -195,7 +204,7 @@ pub fn debug_tuple_new<'a, 'b>(fmt: &'a mut fmt::Formatter<'b>, name: &str) -> D
 impl<'a, 'b: 'a> DebugTuple<'a, 'b> {
     /// Adds a new field to the generated tuple struct output.
     #[stable(feature = "debug_builders", since = "1.2.0")]
-    pub fn field(&mut self, value: &fmt::Debug) -> &mut DebugTuple<'a, 'b> {
+    pub fn field(&mut self, value: &dyn fmt::Debug) -> &mut DebugTuple<'a, 'b> {
         self.result = self.result.and_then(|_| {
             let (prefix, space) = if self.fields > 0 {
                 (",", " ")
@@ -204,10 +213,15 @@ impl<'a, 'b: 'a> DebugTuple<'a, 'b> {
             };
 
             if self.is_pretty() {
-                let mut writer = PadAdapter::new(self.fmt);
-                fmt::write(&mut writer, format_args!("{}\n{:#?}", prefix, value))
+                let mut slot = None;
+                let mut writer = PadAdapter::wrap(&mut self.fmt, &mut slot);
+                writer.write_str(prefix)?;
+                writer.write_str("\n")?;
+                value.fmt(&mut writer)
             } else {
-                write!(self.fmt, "{}{}{:?}", prefix, space, value)
+                self.fmt.write_str(prefix)?;
+                self.fmt.write_str(space)?;
+                value.fmt(self.fmt)
             }
         });
 
@@ -244,23 +258,22 @@ struct DebugInner<'a, 'b: 'a> {
 }
 
 impl<'a, 'b: 'a> DebugInner<'a, 'b> {
-    fn entry(&mut self, entry: &fmt::Debug) {
+    fn entry(&mut self, entry: &dyn fmt::Debug) {
         self.result = self.result.and_then(|_| {
             if self.is_pretty() {
-                let mut writer = PadAdapter::new(self.fmt);
-                let prefix = if self.has_fields {
-                    ","
+                let mut slot = None;
+                let mut writer = PadAdapter::wrap(&mut self.fmt, &mut slot);
+                writer.write_str(if self.has_fields {
+                    ",\n"
                 } else {
-                    ""
-                };
-                fmt::write(&mut writer, format_args!("{}\n{:#?}", prefix, entry))
+                    "\n"
+                })?;
+                entry.fmt(&mut writer)
             } else {
-                let prefix = if self.has_fields {
-                    ", "
-                } else {
-                    ""
-                };
-                write!(self.fmt, "{}{:?}", prefix, entry)
+                if self.has_fields {
+                    self.fmt.write_str(", ")?
+                }
+                entry.fmt(self.fmt)
             }
         });
 
@@ -306,7 +319,7 @@ impl<'a, 'b: 'a> DebugInner<'a, 'b> {
 /// // prints "{10, 11}"
 /// println!("{:?}", Foo(vec![10, 11]));
 /// ```
-#[must_use]
+#[must_use = "must eventually call `finish()` on Debug builders"]
 #[allow(missing_debug_implementations)]
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub struct DebugSet<'a, 'b: 'a> {
@@ -327,7 +340,7 @@ pub fn debug_set_new<'a, 'b>(fmt: &'a mut fmt::Formatter<'b>) -> DebugSet<'a, 'b
 impl<'a, 'b: 'a> DebugSet<'a, 'b> {
     /// Adds a new entry to the set output.
     #[stable(feature = "debug_builders", since = "1.2.0")]
-    pub fn entry(&mut self, entry: &fmt::Debug) -> &mut DebugSet<'a, 'b> {
+    pub fn entry(&mut self, entry: &dyn fmt::Debug) -> &mut DebugSet<'a, 'b> {
         self.inner.entry(entry);
         self
     }
@@ -377,7 +390,7 @@ impl<'a, 'b: 'a> DebugSet<'a, 'b> {
 /// // prints "[10, 11]"
 /// println!("{:?}", Foo(vec![10, 11]));
 /// ```
-#[must_use]
+#[must_use = "must eventually call `finish()` on Debug builders"]
 #[allow(missing_debug_implementations)]
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub struct DebugList<'a, 'b: 'a> {
@@ -398,7 +411,7 @@ pub fn debug_list_new<'a, 'b>(fmt: &'a mut fmt::Formatter<'b>) -> DebugList<'a, 
 impl<'a, 'b: 'a> DebugList<'a, 'b> {
     /// Adds a new entry to the list output.
     #[stable(feature = "debug_builders", since = "1.2.0")]
-    pub fn entry(&mut self, entry: &fmt::Debug) -> &mut DebugList<'a, 'b> {
+    pub fn entry(&mut self, entry: &dyn fmt::Debug) -> &mut DebugList<'a, 'b> {
         self.inner.entry(entry);
         self
     }
@@ -448,7 +461,7 @@ impl<'a, 'b: 'a> DebugList<'a, 'b> {
 /// // prints "{"A": 10, "B": 11}"
 /// println!("{:?}", Foo(vec![("A".to_string(), 10), ("B".to_string(), 11)]));
 /// ```
-#[must_use]
+#[must_use = "must eventually call `finish()` on Debug builders"]
 #[allow(missing_debug_implementations)]
 #[stable(feature = "debug_builders", since = "1.2.0")]
 pub struct DebugMap<'a, 'b: 'a> {
@@ -469,24 +482,26 @@ pub fn debug_map_new<'a, 'b>(fmt: &'a mut fmt::Formatter<'b>) -> DebugMap<'a, 'b
 impl<'a, 'b: 'a> DebugMap<'a, 'b> {
     /// Adds a new entry to the map output.
     #[stable(feature = "debug_builders", since = "1.2.0")]
-    pub fn entry(&mut self, key: &fmt::Debug, value: &fmt::Debug) -> &mut DebugMap<'a, 'b> {
+    pub fn entry(&mut self, key: &dyn fmt::Debug, value: &dyn fmt::Debug) -> &mut DebugMap<'a, 'b> {
         self.result = self.result.and_then(|_| {
             if self.is_pretty() {
-                let mut writer = PadAdapter::new(self.fmt);
-                let prefix = if self.has_fields {
-                    ","
+                let mut slot = None;
+                let mut writer = PadAdapter::wrap(&mut self.fmt, &mut slot);
+                writer.write_str(if self.has_fields {
+                    ",\n"
                 } else {
-                    ""
-                };
-                fmt::write(&mut writer,
-                           format_args!("{}\n{:#?}: {:#?}", prefix, key, value))
+                    "\n"
+                })?;
+                key.fmt(&mut writer)?;
+                writer.write_str(": ")?;
+                value.fmt(&mut writer)
             } else {
-                let prefix = if self.has_fields {
-                    ", "
-                } else {
-                    ""
-                };
-                write!(self.fmt, "{}{:?}: {:?}", prefix, key, value)
+                if self.has_fields {
+                    self.fmt.write_str(", ")?
+                }
+                key.fmt(self.fmt)?;
+                self.fmt.write_str(": ")?;
+                value.fmt(self.fmt)
             }
         });
 

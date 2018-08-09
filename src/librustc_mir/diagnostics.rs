@@ -12,6 +12,541 @@
 
 register_long_diagnostics! {
 
+
+E0001: r##"
+#### Note: this error code is no longer emitted by the compiler.
+
+This error suggests that the expression arm corresponding to the noted pattern
+will never be reached as for all possible values of the expression being
+matched, one of the preceding patterns will match.
+
+This means that perhaps some of the preceding patterns are too general, this
+one is too specific or the ordering is incorrect.
+
+For example, the following `match` block has too many arms:
+
+```
+match Some(0) {
+    Some(bar) => {/* ... */}
+    x => {/* ... */} // This handles the `None` case
+    _ => {/* ... */} // All possible cases have already been handled
+}
+```
+
+`match` blocks have their patterns matched in order, so, for example, putting
+a wildcard arm above a more specific arm will make the latter arm irrelevant.
+
+Ensure the ordering of the match arm is correct and remove any superfluous
+arms.
+"##,
+
+E0002: r##"
+#### Note: this error code is no longer emitted by the compiler.
+
+This error indicates that an empty match expression is invalid because the type
+it is matching on is non-empty (there exist values of this type). In safe code
+it is impossible to create an instance of an empty type, so empty match
+expressions are almost never desired. This error is typically fixed by adding
+one or more cases to the match expression.
+
+An example of an empty type is `enum Empty { }`. So, the following will work:
+
+```
+enum Empty {}
+
+fn foo(x: Empty) {
+    match x {
+        // empty
+    }
+}
+```
+
+However, this won't:
+
+```compile_fail
+fn foo(x: Option<String>) {
+    match x {
+        // empty
+    }
+}
+```
+"##,
+
+E0004: r##"
+This error indicates that the compiler cannot guarantee a matching pattern for
+one or more possible inputs to a match expression. Guaranteed matches are
+required in order to assign values to match expressions, or alternatively,
+determine the flow of execution. Erroneous code example:
+
+```compile_fail,E0004
+enum Terminator {
+    HastaLaVistaBaby,
+    TalkToMyHand,
+}
+
+let x = Terminator::HastaLaVistaBaby;
+
+match x { // error: non-exhaustive patterns: `HastaLaVistaBaby` not covered
+    Terminator::TalkToMyHand => {}
+}
+```
+
+If you encounter this error you must alter your patterns so that every possible
+value of the input type is matched. For types with a small number of variants
+(like enums) you should probably cover all cases explicitly. Alternatively, the
+underscore `_` wildcard pattern can be added after all other patterns to match
+"anything else". Example:
+
+```
+enum Terminator {
+    HastaLaVistaBaby,
+    TalkToMyHand,
+}
+
+let x = Terminator::HastaLaVistaBaby;
+
+match x {
+    Terminator::TalkToMyHand => {}
+    Terminator::HastaLaVistaBaby => {}
+}
+
+// or:
+
+match x {
+    Terminator::TalkToMyHand => {}
+    _ => {}
+}
+```
+"##,
+
+E0005: r##"
+Patterns used to bind names must be irrefutable, that is, they must guarantee
+that a name will be extracted in all cases. Erroneous code example:
+
+```compile_fail,E0005
+let x = Some(1);
+let Some(y) = x;
+// error: refutable pattern in local binding: `None` not covered
+```
+
+If you encounter this error you probably need to use a `match` or `if let` to
+deal with the possibility of failure. Example:
+
+```
+let x = Some(1);
+
+match x {
+    Some(y) => {
+        // do something
+    },
+    None => {}
+}
+
+// or:
+
+if let Some(y) = x {
+    // do something
+}
+```
+"##,
+
+E0007: r##"
+This error indicates that the bindings in a match arm would require a value to
+be moved into more than one location, thus violating unique ownership. Code
+like the following is invalid as it requires the entire `Option<String>` to be
+moved into a variable called `op_string` while simultaneously requiring the
+inner `String` to be moved into a variable called `s`.
+
+```compile_fail,E0007
+let x = Some("s".to_string());
+
+match x {
+    op_string @ Some(s) => {}, // error: cannot bind by-move with sub-bindings
+    None => {},
+}
+```
+
+See also the error E0303.
+"##,
+
+E0008: r##"
+Names bound in match arms retain their type in pattern guards. As such, if a
+name is bound by move in a pattern, it should also be moved to wherever it is
+referenced in the pattern guard code. Doing so however would prevent the name
+from being available in the body of the match arm. Consider the following:
+
+```compile_fail,E0008
+match Some("hi".to_string()) {
+    Some(s) if s.len() == 0 => {}, // use s.
+    _ => {},
+}
+```
+
+The variable `s` has type `String`, and its use in the guard is as a variable of
+type `String`. The guard code effectively executes in a separate scope to the
+body of the arm, so the value would be moved into this anonymous scope and
+therefore becomes unavailable in the body of the arm.
+
+The problem above can be solved by using the `ref` keyword.
+
+```
+match Some("hi".to_string()) {
+    Some(ref s) if s.len() == 0 => {},
+    _ => {},
+}
+```
+
+Though this example seems innocuous and easy to solve, the problem becomes clear
+when it encounters functions which consume the value:
+
+```compile_fail,E0008
+struct A{}
+
+impl A {
+    fn consume(self) -> usize {
+        0
+    }
+}
+
+fn main() {
+    let a = Some(A{});
+    match a {
+        Some(y) if y.consume() > 0 => {}
+        _ => {}
+    }
+}
+```
+
+In this situation, even the `ref` keyword cannot solve it, since borrowed
+content cannot be moved. This problem cannot be solved generally. If the value
+can be cloned, here is a not-so-specific solution:
+
+```
+#[derive(Clone)]
+struct A{}
+
+impl A {
+    fn consume(self) -> usize {
+        0
+    }
+}
+
+fn main() {
+    let a = Some(A{});
+    match a{
+        Some(ref y) if y.clone().consume() > 0 => {}
+        _ => {}
+    }
+}
+```
+
+If the value will be consumed in the pattern guard, using its clone will not
+move its ownership, so the code works.
+"##,
+
+E0009: r##"
+In a pattern, all values that don't implement the `Copy` trait have to be bound
+the same way. The goal here is to avoid binding simultaneously by-move and
+by-ref.
+
+This limitation may be removed in a future version of Rust.
+
+Erroneous code example:
+
+```compile_fail,E0009
+struct X { x: (), }
+
+let x = Some((X { x: () }, X { x: () }));
+match x {
+    Some((y, ref z)) => {}, // error: cannot bind by-move and by-ref in the
+                            //        same pattern
+    None => panic!()
+}
+```
+
+You have two solutions:
+
+Solution #1: Bind the pattern's values the same way.
+
+```
+struct X { x: (), }
+
+let x = Some((X { x: () }, X { x: () }));
+match x {
+    Some((ref y, ref z)) => {},
+    // or Some((y, z)) => {}
+    None => panic!()
+}
+```
+
+Solution #2: Implement the `Copy` trait for the `X` structure.
+
+However, please keep in mind that the first solution should be preferred.
+
+```
+#[derive(Clone, Copy)]
+struct X { x: (), }
+
+let x = Some((X { x: () }, X { x: () }));
+match x {
+    Some((y, ref z)) => {},
+    None => panic!()
+}
+```
+"##,
+
+E0030: r##"
+When matching against a range, the compiler verifies that the range is
+non-empty.  Range patterns include both end-points, so this is equivalent to
+requiring the start of the range to be less than or equal to the end of the
+range.
+
+For example:
+
+```compile_fail
+match 5u32 {
+    // This range is ok, albeit pointless.
+    1 ..= 1 => {}
+    // This range is empty, and the compiler can tell.
+    1000 ..= 5 => {}
+}
+```
+"##,
+
+E0158: r##"
+`const` and `static` mean different things. A `const` is a compile-time
+constant, an alias for a literal value. This property means you can match it
+directly within a pattern.
+
+The `static` keyword, on the other hand, guarantees a fixed location in memory.
+This does not always mean that the value is constant. For example, a global
+mutex can be declared `static` as well.
+
+If you want to match against a `static`, consider using a guard instead:
+
+```
+static FORTY_TWO: i32 = 42;
+
+match Some(42) {
+    Some(x) if x == FORTY_TWO => {}
+    _ => {}
+}
+```
+"##,
+
+E0162: r##"
+An if-let pattern attempts to match the pattern, and enters the body if the
+match was successful. If the match is irrefutable (when it cannot fail to
+match), use a regular `let`-binding instead. For instance:
+
+```compile_fail,E0162
+struct Irrefutable(i32);
+let irr = Irrefutable(0);
+
+// This fails to compile because the match is irrefutable.
+if let Irrefutable(x) = irr {
+    // This body will always be executed.
+    // ...
+}
+```
+
+Try this instead:
+
+```
+struct Irrefutable(i32);
+let irr = Irrefutable(0);
+
+let Irrefutable(x) = irr;
+println!("{}", x);
+```
+"##,
+
+E0165: r##"
+A while-let pattern attempts to match the pattern, and enters the body if the
+match was successful. If the match is irrefutable (when it cannot fail to
+match), use a regular `let`-binding inside a `loop` instead. For instance:
+
+```compile_fail,E0165
+struct Irrefutable(i32);
+let irr = Irrefutable(0);
+
+// This fails to compile because the match is irrefutable.
+while let Irrefutable(x) = irr {
+    // ...
+}
+```
+
+Try this instead:
+
+```no_run
+struct Irrefutable(i32);
+let irr = Irrefutable(0);
+
+loop {
+    let Irrefutable(x) = irr;
+    // ...
+}
+```
+"##,
+
+E0170: r##"
+Enum variants are qualified by default. For example, given this type:
+
+```
+enum Method {
+    GET,
+    POST,
+}
+```
+
+You would match it using:
+
+```
+enum Method {
+    GET,
+    POST,
+}
+
+let m = Method::GET;
+
+match m {
+    Method::GET => {},
+    Method::POST => {},
+}
+```
+
+If you don't qualify the names, the code will bind new variables named "GET" and
+"POST" instead. This behavior is likely not what you want, so `rustc` warns when
+that happens.
+
+Qualified names are good practice, and most code works well with them. But if
+you prefer them unqualified, you can import the variants into scope:
+
+```
+use Method::*;
+enum Method { GET, POST }
+# fn main() {}
+```
+
+If you want others to be able to import variants from your module directly, use
+`pub use`:
+
+```
+pub use Method::*;
+pub enum Method { GET, POST }
+# fn main() {}
+```
+"##,
+
+
+E0297: r##"
+#### Note: this error code is no longer emitted by the compiler.
+
+Patterns used to bind names must be irrefutable. That is, they must guarantee
+that a name will be extracted in all cases. Instead of pattern matching the
+loop variable, consider using a `match` or `if let` inside the loop body. For
+instance:
+
+```compile_fail,E0005
+let xs : Vec<Option<i32>> = vec![Some(1), None];
+
+// This fails because `None` is not covered.
+for Some(x) in xs {
+    // ...
+}
+```
+
+Match inside the loop instead:
+
+```
+let xs : Vec<Option<i32>> = vec![Some(1), None];
+
+for item in xs {
+    match item {
+        Some(x) => {},
+        None => {},
+    }
+}
+```
+
+Or use `if let`:
+
+```
+let xs : Vec<Option<i32>> = vec![Some(1), None];
+
+for item in xs {
+    if let Some(x) = item {
+        // ...
+    }
+}
+```
+"##,
+
+E0301: r##"
+Mutable borrows are not allowed in pattern guards, because matching cannot have
+side effects. Side effects could alter the matched object or the environment
+on which the match depends in such a way, that the match would not be
+exhaustive. For instance, the following would not match any arm if mutable
+borrows were allowed:
+
+```compile_fail,E0301
+match Some(()) {
+    None => { },
+    option if option.take().is_none() => {
+        /* impossible, option is `Some` */
+    },
+    Some(_) => { } // When the previous match failed, the option became `None`.
+}
+```
+"##,
+
+E0302: r##"
+Assignments are not allowed in pattern guards, because matching cannot have
+side effects. Side effects could alter the matched object or the environment
+on which the match depends in such a way, that the match would not be
+exhaustive. For instance, the following would not match any arm if assignments
+were allowed:
+
+```compile_fail,E0302
+match Some(()) {
+    None => { },
+    option if { option = None; false } => { },
+    Some(_) => { } // When the previous match failed, the option became `None`.
+}
+```
+"##,
+
+E0303: r##"
+In certain cases it is possible for sub-bindings to violate memory safety.
+Updates to the borrow checker in a future version of Rust may remove this
+restriction, but for now patterns must be rewritten without sub-bindings.
+
+Before:
+
+```compile_fail,E0303
+match Some("hi".to_string()) {
+    ref op_string_ref @ Some(s) => {},
+    None => {},
+}
+```
+
+After:
+
+```
+match Some("hi".to_string()) {
+    Some(ref s) => {
+        let op_string_ref = &Some(s);
+        // ...
+    },
+    None => {},
+}
+```
+
+The `op_string_ref` binding has type `&Option<&String>` in both cases.
+
+See also https://github.com/rust-lang/rust/issues/14587
+"##,
+
 E0010: r##"
 The value of statics and constants must be known at compile time, and they live
 for the entire lifetime of a program. Creating a boxed value allocates memory on
@@ -62,21 +597,6 @@ See [RFC 911] for more details on the design of `const fn`s.
 [RFC 911]: https://github.com/rust-lang/rfcs/blob/master/text/0911-const-fn.md
 "##,
 
-E0016: r##"
-Blocks in constants may only contain items (such as constant, function
-definition, etc...) and a tail expression. Erroneous code example:
-
-```compile_fail,E0016
-const FOO: i32 = { let x = 0; x }; // 'x' isn't an item!
-```
-
-To avoid it, you have to replace the non-item object:
-
-```
-const FOO: i32 = { const X : i32 = 0; X };
-```
-"##,
-
 E0017: r##"
 References in statics and constants may only refer to immutable values.
 Erroneous code example:
@@ -97,38 +617,6 @@ is not allowed.
 
 If you really want global mutable state, try using `static mut` or a global
 `UnsafeCell`.
-"##,
-
-E0018: r##"
-
-The value of static and constant integers must be known at compile time. You
-can't cast a pointer to an integer because the address of a pointer can
-vary.
-
-For example, if you write:
-
-```compile_fail,E0018
-static MY_STATIC: u32 = 42;
-static MY_STATIC_ADDR: usize = &MY_STATIC as *const _ as usize;
-static WHAT: usize = (MY_STATIC_ADDR^17) + MY_STATIC_ADDR;
-```
-
-Then `MY_STATIC_ADDR` would contain the address of `MY_STATIC`. However,
-the address can change when the program is linked, as well as change
-between different executions due to ASLR, and many linkers would
-not be able to calculate the value of `WHAT`.
-
-On the other hand, static and constant pointers can point either to
-a known numeric address or to the address of a symbol.
-
-```
-static MY_STATIC: u32 = 42;
-static MY_STATIC_ADDR: &'static u32 = &MY_STATIC;
-const CONST_ADDR: *const u8 = 0x5f3759df as *const u8;
-```
-
-This does not pose a problem by itself because they can't be
-accessed directly.
 "##,
 
 E0019: r##"
@@ -229,6 +717,57 @@ fn main() {
 See also https://doc.rust-lang.org/book/first-edition/unsafe.html
 "##,
 
+E0373: r##"
+This error occurs when an attempt is made to use data captured by a closure,
+when that data may no longer exist. It's most commonly seen when attempting to
+return a closure:
+
+```compile_fail,E0373
+fn foo() -> Box<Fn(u32) -> u32> {
+    let x = 0u32;
+    Box::new(|y| x + y)
+}
+```
+
+Notice that `x` is stack-allocated by `foo()`. By default, Rust captures
+closed-over data by reference. This means that once `foo()` returns, `x` no
+longer exists. An attempt to access `x` within the closure would thus be
+unsafe.
+
+Another situation where this might be encountered is when spawning threads:
+
+```compile_fail,E0373
+fn foo() {
+    let x = 0u32;
+    let y = 1u32;
+
+    let thr = std::thread::spawn(|| {
+        x + y
+    });
+}
+```
+
+Since our new thread runs in parallel, the stack frame containing `x` and `y`
+may well have disappeared by the time we try to use them. Even if we call
+`thr.join()` within foo (which blocks until `thr` has completed, ensuring the
+stack frame won't disappear), we will not succeed: the compiler cannot prove
+that this behaviour is safe, and so won't let us do it.
+
+The solution to this problem is usually to switch to using a `move` closure.
+This approach moves (or copies, where possible) data into the closure, rather
+than taking references to it. For example:
+
+```
+fn foo() -> Box<Fn(u32) -> u32> {
+    let x = 0u32;
+    Box::new(move |y| x + y)
+}
+```
+
+Now that the closure has its own copy of the data, there's no need to worry
+about safety.
+"##,
+
 E0381: r##"
 It is not allowed to use or capture an uninitialized variable. For example:
 
@@ -247,6 +786,152 @@ fn main() {
     let x: i32 = 0;
     let y = x; // ok!
 }
+```
+"##,
+
+E0382: r##"
+This error occurs when an attempt is made to use a variable after its contents
+have been moved elsewhere. For example:
+
+```compile_fail,E0382
+struct MyStruct { s: u32 }
+
+fn main() {
+    let mut x = MyStruct{ s: 5u32 };
+    let y = x;
+    x.s = 6;
+    println!("{}", x.s);
+}
+```
+
+Since `MyStruct` is a type that is not marked `Copy`, the data gets moved out
+of `x` when we set `y`. This is fundamental to Rust's ownership system: outside
+of workarounds like `Rc`, a value cannot be owned by more than one variable.
+
+Sometimes we don't need to move the value. Using a reference, we can let another
+function borrow the value without changing its ownership. In the example below,
+we don't actually have to move our string to `calculate_length`, we can give it
+a reference to it with `&` instead.
+
+```
+fn main() {
+    let s1 = String::from("hello");
+
+    let len = calculate_length(&s1);
+
+    println!("The length of '{}' is {}.", s1, len);
+}
+
+fn calculate_length(s: &String) -> usize {
+    s.len()
+}
+```
+
+A mutable reference can be created with `&mut`.
+
+Sometimes we don't want a reference, but a duplicate. All types marked `Clone`
+can be duplicated by calling `.clone()`. Subsequent changes to a clone do not
+affect the original variable.
+
+Most types in the standard library are marked `Clone`. The example below
+demonstrates using `clone()` on a string. `s1` is first set to "many", and then
+copied to `s2`. Then the first character of `s1` is removed, without affecting
+`s2`. "any many" is printed to the console.
+
+```
+fn main() {
+    let mut s1 = String::from("many");
+    let s2 = s1.clone();
+    s1.remove(0);
+    println!("{} {}", s1, s2);
+}
+```
+
+If we control the definition of a type, we can implement `Clone` on it ourselves
+with `#[derive(Clone)]`.
+
+Some types have no ownership semantics at all and are trivial to duplicate. An
+example is `i32` and the other number types. We don't have to call `.clone()` to
+clone them, because they are marked `Copy` in addition to `Clone`.  Implicit
+cloning is more convenient in this case. We can mark our own types `Copy` if
+all their members also are marked `Copy`.
+
+In the example below, we implement a `Point` type. Because it only stores two
+integers, we opt-out of ownership semantics with `Copy`. Then we can
+`let p2 = p1` without `p1` being moved.
+
+```
+#[derive(Copy, Clone)]
+struct Point { x: i32, y: i32 }
+
+fn main() {
+    let mut p1 = Point{ x: -1, y: 2 };
+    let p2 = p1;
+    p1.x = 1;
+    println!("p1: {}, {}", p1.x, p1.y);
+    println!("p2: {}, {}", p2.x, p2.y);
+}
+```
+
+Alternatively, if we don't control the struct's definition, or mutable shared
+ownership is truly required, we can use `Rc` and `RefCell`:
+
+```
+use std::cell::RefCell;
+use std::rc::Rc;
+
+struct MyStruct { s: u32 }
+
+fn main() {
+    let mut x = Rc::new(RefCell::new(MyStruct{ s: 5u32 }));
+    let y = x.clone();
+    x.borrow_mut().s = 6;
+    println!("{}", x.borrow().s);
+}
+```
+
+With this approach, x and y share ownership of the data via the `Rc` (reference
+count type). `RefCell` essentially performs runtime borrow checking: ensuring
+that at most one writer or multiple readers can access the data at any one time.
+
+If you wish to learn more about ownership in Rust, start with the chapter in the
+Book:
+
+https://doc.rust-lang.org/book/first-edition/ownership.html
+"##,
+
+E0383: r##"
+This error occurs when an attempt is made to partially reinitialize a
+structure that is currently uninitialized.
+
+For example, this can happen when a drop has taken place:
+
+```compile_fail,E0383
+struct Foo {
+    a: u32,
+}
+impl Drop for Foo {
+    fn drop(&mut self) { /* ... */ }
+}
+
+let mut x = Foo { a: 1 };
+drop(x); // `x` is now uninitialized
+x.a = 2; // error, partial reinitialization of uninitialized structure `t`
+```
+
+This error can be fixed by fully reinitializing the structure in question:
+
+```
+struct Foo {
+    a: u32,
+}
+impl Drop for Foo {
+    fn drop(&mut self) { /* ... */ }
+}
+
+let mut x = Foo { a: 1 };
+drop(x);
+x = Foo { a: 2 };
 ```
 "##,
 
@@ -272,61 +957,159 @@ fn main() {
 ```
 "##,
 
+/*E0386: r##"
+This error occurs when an attempt is made to mutate the target of a mutable
+reference stored inside an immutable container.
 
-E0394: r##"
-A static was referred to by value by another static.
+For example, this can happen when storing a `&mut` inside an immutable `Box`:
 
-Erroneous code examples:
-
-```compile_fail,E0394
-static A: u32 = 0;
-static B: u32 = A; // error: cannot refer to other statics by value, use the
-                   //        address-of operator or a constant instead
+```compile_fail,E0386
+let mut x: i64 = 1;
+let y: Box<_> = Box::new(&mut x);
+**y = 2; // error, cannot assign to data in an immutable container
 ```
 
-A static cannot be referred by value. To fix this issue, either use a
-constant:
+This error can be fixed by making the container mutable:
 
 ```
-const A: u32 = 0; // `A` is now a constant
-static B: u32 = A; // ok!
+let mut x: i64 = 1;
+let mut y: Box<_> = Box::new(&mut x);
+**y = 2;
 ```
 
-Or refer to `A` by reference:
+It can also be fixed by using a type with interior mutability, such as `Cell`
+or `RefCell`:
 
 ```
-static A: u32 = 0;
-static B: &'static u32 = &A; // ok!
+use std::cell::Cell;
+
+let x: i64 = 1;
+let y: Box<Cell<_>> = Box::new(Cell::new(x));
+y.set(2);
 ```
+"##,*/
+
+E0387: r##"
+This error occurs when an attempt is made to mutate or mutably reference data
+that a closure has captured immutably. Examples of this error are shown below:
+
+```compile_fail,E0387
+// Accepts a function or a closure that captures its environment immutably.
+// Closures passed to foo will not be able to mutate their closed-over state.
+fn foo<F: Fn()>(f: F) { }
+
+// Attempts to mutate closed-over data. Error message reads:
+// `cannot assign to data in a captured outer variable...`
+fn mutable() {
+    let mut x = 0u32;
+    foo(|| x = 2);
+}
+
+// Attempts to take a mutable reference to closed-over data.  Error message
+// reads: `cannot borrow data mutably in a captured outer variable...`
+fn mut_addr() {
+    let mut x = 0u32;
+    foo(|| { let y = &mut x; });
+}
+```
+
+The problem here is that foo is defined as accepting a parameter of type `Fn`.
+Closures passed into foo will thus be inferred to be of type `Fn`, meaning that
+they capture their context immutably.
+
+If the definition of `foo` is under your control, the simplest solution is to
+capture the data mutably. This can be done by defining `foo` to take FnMut
+rather than Fn:
+
+```
+fn foo<F: FnMut()>(f: F) { }
+```
+
+Alternatively, we can consider using the `Cell` and `RefCell` types to achieve
+interior mutability through a shared reference. Our example's `mutable`
+function could be redefined as below:
+
+```
+use std::cell::Cell;
+
+fn foo<F: Fn()>(f: F) { }
+
+fn mutable() {
+    let x = Cell::new(0u32);
+    foo(|| x.set(2));
+}
+```
+
+You can read more about cell types in the API documentation:
+
+https://doc.rust-lang.org/std/cell/
 "##,
 
-E0395: r##"
-The value assigned to a constant scalar must be known at compile time,
-which is not the case when comparing raw pointers.
+E0388: r##"
+E0388 was removed and is no longer issued.
+"##,
 
-Erroneous code example:
+E0389: r##"
+An attempt was made to mutate data using a non-mutable reference. This
+commonly occurs when attempting to assign to a non-mutable reference of a
+mutable reference (`&(&mut T)`).
 
-```compile_fail,E0395
-static FOO: i32 = 42;
-static BAR: i32 = 42;
+Example of erroneous code:
 
-static BAZ: bool = { (&FOO as *const i32) == (&BAR as *const i32) };
-// error: raw pointers cannot be compared in statics!
+```compile_fail,E0389
+struct FancyNum {
+    num: u8,
+}
+
+fn main() {
+    let mut fancy = FancyNum{ num: 5 };
+    let fancy_ref = &(&mut fancy);
+    fancy_ref.num = 6; // error: cannot assign to data in a `&` reference
+    println!("{}", fancy_ref.num);
+}
 ```
 
-The address assigned by the linker to `FOO` and `BAR` may or may not
-be identical, so the value of `BAZ` can't be determined.
+Here, `&mut fancy` is mutable, but `&(&mut fancy)` is not. Creating an
+immutable reference to a value borrows it immutably. There can be multiple
+references of type `&(&mut T)` that point to the same value, so they must be
+immutable to prevent multiple mutable references to the same value.
 
-If you want to do the comparison, please do it at run-time.
-
-For example:
+To fix this, either remove the outer reference:
 
 ```
-static FOO: i32 = 42;
-static BAR: i32 = 42;
+struct FancyNum {
+    num: u8,
+}
 
-let baz: bool = { (&FOO as *const i32) == (&BAR as *const i32) };
-// baz isn't a constant expression so it's ok
+fn main() {
+    let mut fancy = FancyNum{ num: 5 };
+
+    let fancy_ref = &mut fancy;
+    // `fancy_ref` is now &mut FancyNum, rather than &(&mut FancyNum)
+
+    fancy_ref.num = 6; // No error!
+
+    println!("{}", fancy_ref.num);
+}
+```
+
+Or make the outer reference mutable:
+
+```
+struct FancyNum {
+    num: u8
+}
+
+fn main() {
+    let mut fancy = FancyNum{ num: 5 };
+
+    let fancy_ref = &mut (&mut fancy);
+    // `fancy_ref` is now &mut(&mut FancyNum), rather than &(&mut FancyNum)
+
+    fancy_ref.num = 6; // No error!
+
+    println!("{}", fancy_ref.num);
+}
 ```
 "##,
 
@@ -363,29 +1146,6 @@ fn main() {
 ```
 "##,
 
-E0396: r##"
-The value behind a raw pointer can't be determined at compile-time
-(or even link-time), which means it can't be used in a constant
-expression. Erroneous code example:
-
-```compile_fail,E0396
-const REG_ADDR: *const u8 = 0x5f3759df as *const u8;
-
-const VALUE: u8 = unsafe { *REG_ADDR };
-// error: raw pointers cannot be dereferenced in constants
-```
-
-A possible fix is to dereference your pointer at some point in run-time.
-
-For example:
-
-```
-const REG_ADDR: *const u8 = 0x5f3759df as *const u8;
-
-let reg_value = unsafe { *REG_ADDR };
-```
-"##,
-
 E0492: r##"
 A borrow of a constant containing interior mutability was attempted. Erroneous
 code example:
@@ -418,8 +1178,6 @@ static B: &'static AtomicUsize = &A; // ok!
 You can also have this error while using a cell type:
 
 ```compile_fail,E0492
-#![feature(const_cell_new)]
-
 use std::cell::Cell;
 
 const A: Cell<usize> = Cell::new(1);
@@ -438,16 +1196,12 @@ const F: &'static C = &D; // error
 ```
 
 This is because cell types do operations that are not thread-safe. Due to this,
-they don't implement Sync and thus can't be placed in statics. In this
-case, `StaticMutex` would work just fine, but it isn't stable yet:
-https://doc.rust-lang.org/nightly/std/sync/struct.StaticMutex.html
+they don't implement Sync and thus can't be placed in statics.
 
 However, if you still wish to use these types, you can achieve this by an unsafe
 wrapper:
 
 ```
-#![feature(const_cell_new)]
-
 use std::cell::Cell;
 use std::marker::Sync;
 
@@ -463,34 +1217,6 @@ static B: &'static NotThreadSafe<usize> = &A; // ok!
 
 Remember this solution is unsafe! You will have to ensure that accesses to the
 cell are synchronized.
-"##,
-
-E0494: r##"
-A reference of an interior static was assigned to another const/static.
-Erroneous code example:
-
-```compile_fail,E0494
-struct Foo {
-    a: u32
-}
-
-static S : Foo = Foo { a : 0 };
-static A : &'static u32 = &S.a;
-// error: cannot refer to the interior of another static, use a
-//        constant instead
-```
-
-The "base" variable has to be a const if you want another static/const variable
-to refer to one of its fields. Example:
-
-```
-struct Foo {
-    a: u32
-}
-
-const S : Foo = Foo { a : 0 };
-static A : &'static u32 = &S.a; // ok!
-```
 "##,
 
 E0499: r##"
@@ -1265,12 +1991,190 @@ fn main() {
 ```
 "##,
 
+E0579: r##"
+When matching against an exclusive range, the compiler verifies that the range
+is non-empty. Exclusive range patterns include the start point but not the end
+point, so this is equivalent to requiring the start of the range to be less
+than the end of the range.
+
+For example:
+
+```compile_fail
+match 5u32 {
+    // This range is ok, albeit pointless.
+    1 .. 2 => {}
+    // This range is empty, and the compiler can tell.
+    5 .. 5 => {}
+}
+```
+"##,
+
+E0595: r##"
+Closures cannot mutate immutable captured variables.
+
+Erroneous code example:
+
+```compile_fail,E0595
+let x = 3; // error: closure cannot assign to immutable local variable `x`
+let mut c = || { x += 1 };
+```
+
+Make the variable binding mutable:
+
+```
+let mut x = 3; // ok!
+let mut c = || { x += 1 };
+```
+"##,
+
+E0596: r##"
+This error occurs because you tried to mutably borrow a non-mutable variable.
+
+Example of erroneous code:
+
+```compile_fail,E0596
+let x = 1;
+let y = &mut x; // error: cannot borrow mutably
+```
+
+In here, `x` isn't mutable, so when we try to mutably borrow it in `y`, it
+fails. To fix this error, you need to make `x` mutable:
+
+```
+let mut x = 1;
+let y = &mut x; // ok!
+```
+"##,
+
+E0597: r##"
+This error occurs because a borrow was made inside a variable which has a
+greater lifetime than the borrowed one.
+
+Example of erroneous code:
+
+```compile_fail,E0597
+struct Foo<'a> {
+    x: Option<&'a u32>,
+}
+
+let mut x = Foo { x: None };
+let y = 0;
+x.x = Some(&y); // error: `y` does not live long enough
+```
+
+In here, `x` is created before `y` and therefore has a greater lifetime. Always
+keep in mind that values in a scope are dropped in the opposite order they are
+created. So to fix the previous example, just make the `y` lifetime greater than
+the `x`'s one:
+
+```
+struct Foo<'a> {
+    x: Option<&'a u32>,
+}
+
+let y = 0;
+let mut x = Foo { x: None };
+x.x = Some(&y);
+```
+"##,
+
+E0626: r##"
+This error occurs because a borrow in a generator persists across a
+yield point.
+
+```compile_fail,E0626
+# #![feature(generators, generator_trait)]
+# use std::ops::Generator;
+let mut b = || {
+    let a = &String::new(); // <-- This borrow...
+    yield (); // ...is still in scope here, when the yield occurs.
+    println!("{}", a);
+};
+unsafe { b.resume() };
+```
+
+At present, it is not permitted to have a yield that occurs while a
+borrow is still in scope. To resolve this error, the borrow must
+either be "contained" to a smaller scope that does not overlap the
+yield or else eliminated in another way. So, for example, we might
+resolve the previous example by removing the borrow and just storing
+the integer by value:
+
+```
+# #![feature(generators, generator_trait)]
+# use std::ops::Generator;
+let mut b = || {
+    let a = 3;
+    yield ();
+    println!("{}", a);
+};
+unsafe { b.resume() };
+```
+
+This is a very simple case, of course. In more complex cases, we may
+wish to have more than one reference to the value that was borrowed --
+in those cases, something like the `Rc` or `Arc` types may be useful.
+
+This error also frequently arises with iteration:
+
+```compile_fail,E0626
+# #![feature(generators, generator_trait)]
+# use std::ops::Generator;
+let mut b = || {
+  let v = vec![1,2,3];
+  for &x in &v { // <-- borrow of `v` is still in scope...
+    yield x; // ...when this yield occurs.
+  }
+};
+unsafe { b.resume() };
+```
+
+Such cases can sometimes be resolved by iterating "by value" (or using
+`into_iter()`) to avoid borrowing:
+
+```
+# #![feature(generators, generator_trait)]
+# use std::ops::Generator;
+let mut b = || {
+  let v = vec![1,2,3];
+  for x in v { // <-- Take ownership of the values instead!
+    yield x; // <-- Now yield is OK.
+  }
+};
+unsafe { b.resume() };
+```
+
+If taking ownership is not an option, using indices can work too:
+
+```
+# #![feature(generators, generator_trait)]
+# use std::ops::Generator;
+let mut b = || {
+  let v = vec![1,2,3];
+  let len = v.len(); // (*)
+  for i in 0..len {
+    let x = v[i]; // (*)
+    yield x; // <-- Now yield is OK.
+  }
+};
+unsafe { b.resume() };
+
+// (*) -- Unfortunately, these temporaries are currently required.
+// See <https://github.com/rust-lang/rust/issues/43122>.
+```
+"##,
+
 }
 
 register_diagnostics! {
+//  E0298, // cannot compare constants
+//  E0299, // mismatched types between arms
+//  E0471, // constant evaluation error (in pattern)
+//    E0385, // {} in an aliasable location
     E0493, // destructors cannot be evaluated at compile-time
     E0524, // two closures require unique access to `..` at the same time
     E0526, // shuffle indices are not constant
     E0594, // cannot assign to {}
+    E0598, // lifetime of {} is too short to guarantee its contents can be...
     E0625, // thread-local statics cannot be accessed at compile-time
 }

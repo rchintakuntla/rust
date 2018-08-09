@@ -8,14 +8,9 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// The minimum LLVM version is set to 3.8, but really this test
-// depends on a patch that is was committed to upstream LLVM before
-// 4.0; and also backported to the Rust LLVM fork.
-
 // ignore-tidy-linelength
 // ignore-windows
 // ignore-macos
-// min-llvm-version 3.8
 
 // compile-flags: -g -C no-prepopulate-passes
 

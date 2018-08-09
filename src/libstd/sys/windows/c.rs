@@ -20,11 +20,6 @@ use os::raw::c_ulonglong;
 use libc::{wchar_t, size_t, c_void};
 use ptr;
 
-#[repr(simd)]
-#[repr(C)]
-#[cfg(target_arch = "x86_64")]
-struct u64x2(u64, u64);
-
 pub use self::FILE_INFO_BY_HANDLE_CLASS::*;
 pub use self::EXCEPTION_DISPOSITION::*;
 
@@ -37,7 +32,6 @@ pub type BOOL = c_int;
 pub type BYTE = u8;
 pub type BOOLEAN = BYTE;
 pub type GROUP = c_uint;
-pub type LONG_PTR = isize;
 pub type LARGE_INTEGER = c_longlong;
 pub type LONG = c_long;
 pub type UINT = c_uint;
@@ -46,7 +40,6 @@ pub type USHORT = c_ushort;
 pub type SIZE_T = usize;
 pub type WORD = u16;
 pub type CHAR = c_char;
-pub type HCRYPTPROV = LONG_PTR;
 pub type ULONG_PTR = usize;
 pub type ULONG = c_ulong;
 #[cfg(target_arch = "x86_64")]
@@ -288,10 +281,6 @@ pub const IMAGE_FILE_MACHINE_I386: DWORD = 0x014c;
 #[cfg(feature = "backtrace")]
 pub const IMAGE_FILE_MACHINE_AMD64: DWORD = 0x8664;
 
-pub const PROV_RSA_FULL: DWORD = 1;
-pub const CRYPT_SILENT: DWORD = 64;
-pub const CRYPT_VERIFYCONTEXT: DWORD = 0xF0000000;
-
 pub const EXCEPTION_CONTINUE_SEARCH: LONG = 0;
 pub const EXCEPTION_STACK_OVERFLOW: DWORD = 0xc00000fd;
 pub const EXCEPTION_MAXIMUM_PARAMETERS: usize = 15;
@@ -306,6 +295,8 @@ pub const PIPE_REJECT_REMOTE_CLIENTS: DWORD = 0x00000008;
 pub const PIPE_READMODE_BYTE: DWORD = 0x00000000;
 
 pub const FD_SETSIZE: usize = 64;
+
+pub const STACK_SIZE_PARAM_IS_A_RESERVATION: DWORD = 0x00010000;
 
 #[repr(C)]
 #[cfg(not(target_pointer_width = "64"))]
@@ -630,6 +621,24 @@ pub struct ADDRESS64 {
 
 #[repr(C)]
 #[cfg(feature = "backtrace")]
+pub struct STACKFRAME_EX {
+    pub AddrPC: ADDRESS64,
+    pub AddrReturn: ADDRESS64,
+    pub AddrFrame: ADDRESS64,
+    pub AddrStack: ADDRESS64,
+    pub AddrBStore: ADDRESS64,
+    pub FuncTableEntry: *mut c_void,
+    pub Params: [u64; 4],
+    pub Far: BOOL,
+    pub Virtual: BOOL,
+    pub Reserved: [u64; 3],
+    pub KdHelp: KDHELP64,
+    pub StackFrameSize: DWORD,
+    pub InlineFrameContext: DWORD,
+}
+
+#[repr(C)]
+#[cfg(feature = "backtrace")]
 pub struct STACKFRAME64 {
     pub AddrPC: ADDRESS64,
     pub AddrReturn: ADDRESS64,
@@ -706,9 +715,8 @@ pub struct FLOATING_SAVE_AREA {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct CONTEXT {
-    _align_hack: [u64x2; 0], // FIXME align on 16-byte
     pub P1Home: DWORDLONG,
     pub P2Home: DWORDLONG,
     pub P3Home: DWORDLONG,
@@ -766,17 +774,15 @@ pub struct CONTEXT {
 }
 
 #[cfg(target_arch = "x86_64")]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct M128A {
-    _align_hack: [u64x2; 0], // FIXME align on 16-byte
     pub Low:  c_ulonglong,
     pub High: c_longlong
 }
 
 #[cfg(target_arch = "x86_64")]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct FLOATING_SAVE_AREA {
-    _align_hack: [u64x2; 0], // FIXME align on 16-byte
     _Dummy: [u8; 512] // FIXME: Fill this out
 }
 
@@ -1136,15 +1142,6 @@ extern "system" {
     pub fn GetProcAddress(handle: HMODULE,
                           name: LPCSTR) -> *mut c_void;
     pub fn GetModuleHandleW(lpModuleName: LPCWSTR) -> HMODULE;
-    pub fn CryptAcquireContextA(phProv: *mut HCRYPTPROV,
-                                pszContainer: LPCSTR,
-                                pszProvider: LPCSTR,
-                                dwProvType: DWORD,
-                                dwFlags: DWORD) -> BOOL;
-    pub fn CryptGenRandom(hProv: HCRYPTPROV,
-                          dwLen: DWORD,
-                          pbBuffer: *mut BYTE) -> BOOL;
-    pub fn CryptReleaseContext(hProv: HCRYPTPROV, dwFlags: DWORD) -> BOOL;
 
     pub fn GetSystemTimeAsFileTime(lpSystemTimeAsFileTime: LPFILETIME);
 
@@ -1175,6 +1172,9 @@ extern "system" {
                   writefds: *mut fd_set,
                   exceptfds: *mut fd_set,
                   timeout: *const timeval) -> c_int;
+
+    #[link_name = "SystemFunction036"]
+    pub fn RtlGenRandom(RandomBuffer: *mut u8, RandomBufferLength: ULONG) -> BOOLEAN;
 }
 
 // Functions that aren't available on every version of Windows that we support,
@@ -1240,7 +1240,7 @@ compat_fn! {
     }
 }
 
-#[cfg(target_env = "gnu")]
+#[cfg(all(target_env = "gnu", feature = "backtrace"))]
 mod gnu {
     use super::*;
 
@@ -1268,5 +1268,5 @@ mod gnu {
     }
 }
 
-#[cfg(target_env = "gnu")]
+#[cfg(all(target_env = "gnu", feature = "backtrace"))]
 pub use self::gnu::*;

@@ -79,6 +79,14 @@ fn test_writer_hasher() {
 
     let ptr = 5_usize as *mut i32;
     assert_eq!(hash(&ptr), 5);
+
+    let cs: &mut [u8] = &mut [1, 2, 3];
+    let ptr = cs.as_ptr();
+    let slice_ptr = cs as *const [u8];
+    assert_eq!(hash(&slice_ptr), hash(&ptr) + cs.len() as u64);
+
+    let slice_ptr = cs as *mut [u8];
+    assert_eq!(hash(&slice_ptr), hash(&ptr) + cs.len() as u64);
 }
 
 struct Custom { hash: u64 }
@@ -120,7 +128,7 @@ fn test_custom_state() {
 fn test_indirect_hasher() {
     let mut hasher = MyHasher { hash: 0 };
     {
-        let mut indirect_hasher: &mut Hasher = &mut hasher;
+        let mut indirect_hasher: &mut dyn Hasher = &mut hasher;
         5u32.hash(&mut indirect_hasher);
     }
     assert_eq!(hasher.hash, 5);

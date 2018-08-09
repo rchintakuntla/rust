@@ -115,7 +115,7 @@
 //! implemented.
 
 use rustc::hir::svh::Svh;
-use rustc::session::Session;
+use rustc::session::{Session, CrateDisambiguator};
 use rustc::util::fs as fs_util;
 use rustc_data_structures::{flock, base_n};
 use rustc_data_structures::fx::{FxHashSet, FxHashMap};
@@ -125,29 +125,33 @@ use std::io;
 use std::mem;
 use std::path::{Path, PathBuf};
 use std::time::{UNIX_EPOCH, SystemTime, Duration};
-use std::__rand::{thread_rng, Rng};
+
+use rand::{thread_rng, Rng};
 
 const LOCK_FILE_EXT: &'static str = ".lock";
 const DEP_GRAPH_FILENAME: &'static str = "dep-graph.bin";
 const WORK_PRODUCTS_FILENAME: &'static str = "work-products.bin";
-const METADATA_HASHES_FILENAME: &'static str = "metadata.bin";
+const QUERY_CACHE_FILENAME: &'static str = "query-cache.bin";
 
 // We encode integers using the following base, so they are shorter than decimal
 // or hexadecimal numbers (we want short file and directory names). Since these
 // numbers will be used in file names, we choose an encoding that is not
 // case-sensitive (as opposed to base64, for example).
-const INT_ENCODE_BASE: u64 = 36;
+const INT_ENCODE_BASE: usize = base_n::CASE_INSENSITIVE;
 
 pub fn dep_graph_path(sess: &Session) -> PathBuf {
     in_incr_comp_dir_sess(sess, DEP_GRAPH_FILENAME)
+}
+pub fn dep_graph_path_from(incr_comp_session_dir: &Path) -> PathBuf {
+    in_incr_comp_dir(incr_comp_session_dir, DEP_GRAPH_FILENAME)
 }
 
 pub fn work_products_path(sess: &Session) -> PathBuf {
     in_incr_comp_dir_sess(sess, WORK_PRODUCTS_FILENAME)
 }
 
-pub fn metadata_hash_export_path(sess: &Session) -> PathBuf {
-    in_incr_comp_dir_sess(sess, METADATA_HASHES_FILENAME)
+pub fn query_cache_path(sess: &Session) -> PathBuf {
+    in_incr_comp_dir_sess(sess, QUERY_CACHE_FILENAME)
 }
 
 pub fn lock_file_path(session_dir: &Path) -> PathBuf {
@@ -188,7 +192,7 @@ pub fn in_incr_comp_dir(incr_comp_session_dir: &Path, file_name: &str) -> PathBu
 /// The garbage collection will take care of it.
 pub fn prepare_session_directory(sess: &Session,
                                  crate_name: &str,
-                                 crate_disambiguator: &str) {
+                                 crate_disambiguator: CrateDisambiguator) {
     if sess.opts.incremental.is_none() {
         return
     }
@@ -256,11 +260,12 @@ pub fn prepare_session_directory(sess: &Session,
         debug!("attempting to copy data from source: {}",
                source_directory.display());
 
-        let print_file_copy_stats = sess.opts.debugging_opts.incremental_info;
+
 
         // Try copying over all files from the source directory
-        if let Ok(allows_links) = copy_files(&session_dir, &source_directory,
-                                             print_file_copy_stats) {
+        if let Ok(allows_links) = copy_files(sess,
+                                             &session_dir,
+                                             &source_directory) {
             debug!("successfully copied data from: {}",
                    source_directory.display());
 
@@ -352,7 +357,7 @@ pub fn finalize_session_directory(sess: &Session, svh: Svh) {
     let mut new_sub_dir_name = String::from(&old_sub_dir_name[.. dash_indices[2] + 1]);
 
     // Append the svh
-    base_n::push_str(svh.as_u64(), INT_ENCODE_BASE, &mut new_sub_dir_name);
+    base_n::push_str(svh.as_u64() as u128, INT_ENCODE_BASE, &mut new_sub_dir_name);
 
     // Create the full path
     let new_path = incr_comp_session_dir.parent().unwrap().join(new_sub_dir_name);
@@ -390,9 +395,9 @@ pub fn delete_all_session_dir_contents(sess: &Session) -> io::Result<()> {
     Ok(())
 }
 
-fn copy_files(target_dir: &Path,
-              source_dir: &Path,
-              print_stats_on_success: bool)
+fn copy_files(sess: &Session,
+              target_dir: &Path,
+              source_dir: &Path)
               -> Result<bool, ()> {
     // We acquire a shared lock on the lock file of the directory, so that
     // nobody deletes it out from under us while we are reading from it.
@@ -440,9 +445,11 @@ fn copy_files(target_dir: &Path,
         }
     }
 
-    if print_stats_on_success {
-        eprintln!("incremental: session directory: {} files hard-linked", files_linked);
-        eprintln!("incremental: session directory: {} files copied", files_copied);
+    if sess.opts.debugging_opts.incremental_info {
+        println!("[incremental] session directory: \
+                  {} files hard-linked", files_linked);
+        println!("[incremental] session directory: \
+                 {} files copied", files_copied);
     }
 
     Ok(files_linked > 0 || files_copied == 0)
@@ -458,7 +465,7 @@ fn generate_session_dir_path(crate_dir: &Path) -> PathBuf {
 
     let directory_name = format!("s-{}-{}-working",
                                   timestamp,
-                                  base_n::encode(random_number as u64,
+                                  base_n::encode(random_number as u128,
                                                  INT_ENCODE_BASE));
     debug!("generate_session_dir_path: directory_name = {}", directory_name);
     let directory_path = crate_dir.join(directory_name);
@@ -592,11 +599,11 @@ fn timestamp_to_string(timestamp: SystemTime) -> String {
     let duration = timestamp.duration_since(UNIX_EPOCH).unwrap();
     let micros = duration.as_secs() * 1_000_000 +
                 (duration.subsec_nanos() as u64) / 1000;
-    base_n::encode(micros, INT_ENCODE_BASE)
+    base_n::encode(micros as u128, INT_ENCODE_BASE)
 }
 
 fn string_to_timestamp(s: &str) -> Result<SystemTime, ()> {
-    let micros_since_unix_epoch = u64::from_str_radix(s, 36);
+    let micros_since_unix_epoch = u64::from_str_radix(s, INT_ENCODE_BASE as u32);
 
     if micros_since_unix_epoch.is_err() {
         return Err(())
@@ -611,21 +618,18 @@ fn string_to_timestamp(s: &str) -> Result<SystemTime, ()> {
 
 fn crate_path(sess: &Session,
               crate_name: &str,
-              crate_disambiguator: &str)
+              crate_disambiguator: CrateDisambiguator)
               -> PathBuf {
-    use std::hash::{Hasher, Hash};
-    use std::collections::hash_map::DefaultHasher;
 
     let incr_dir = sess.opts.incremental.as_ref().unwrap().clone();
 
-    // The full crate disambiguator is really long. A hash of it should be
+    // The full crate disambiguator is really long. 64 bits of it should be
     // sufficient.
-    let mut hasher = DefaultHasher::new();
-    crate_disambiguator.hash(&mut hasher);
+    let crate_disambiguator = crate_disambiguator.to_fingerprint().to_smaller_hash();
+    let crate_disambiguator = base_n::encode(crate_disambiguator as u128,
+                                             INT_ENCODE_BASE);
 
-    let crate_name = format!("{}-{}",
-                             crate_name,
-                             base_n::encode(hasher.finish(), INT_ENCODE_BASE));
+    let crate_name = format!("{}-{}", crate_name, crate_disambiguator);
     incr_dir.join(crate_name)
 }
 
@@ -729,6 +733,20 @@ pub fn garbage_collect_session_directories(sess: &Session) -> io::Result<()> {
                                 })
                                 .collect();
 
+    // Delete all session directories that don't have a lock file.
+    for directory_name in session_directories {
+        if !lock_file_to_session_dir.values().any(|dir| *dir == directory_name) {
+            let path = crate_directory.join(directory_name);
+            if let Err(err) = safe_remove_dir_all(&path) {
+                sess.warn(&format!("Failed to garbage collect invalid incremental \
+                                    compilation session directory `{}`: {}",
+                                    path.display(),
+                                    err));
+            }
+        }
+    }
+
+    // Now garbage collect the valid session directories.
     let mut deletion_candidates = vec![];
     let mut definitely_delete = vec![];
 

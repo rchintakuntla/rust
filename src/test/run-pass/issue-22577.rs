@@ -9,8 +9,7 @@
 // except according to those terms.
 
 // pretty-expanded FIXME #23616
-
-#![feature(fs, net)]
+// ignore-cloudabi no std::fs
 
 use std::{fs, net};
 

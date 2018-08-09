@@ -12,11 +12,15 @@ use std::cmp;
 use std::string::String;
 use std::usize;
 
-use clean::{self, Item};
-use plugins;
+use clean::{self, DocFragment, Item};
 use fold::{self, DocFolder};
+use passes::Pass;
 
-pub fn unindent_comments(krate: clean::Crate) -> plugins::PluginResult {
+pub const UNINDENT_COMMENTS: Pass =
+    Pass::late("unindent-comments", unindent_comments,
+        "removes excess indentation on comments in order for markdown to like it");
+
+pub fn unindent_comments(krate: clean::Crate) -> clean::Crate {
     CommentCleaner.fold_crate(krate)
 }
 
@@ -31,8 +35,17 @@ impl fold::DocFolder for CommentCleaner {
 
 impl clean::Attributes {
     pub fn unindent_doc_comments(&mut self) {
-        for doc_string in &mut self.doc_strings {
-            *doc_string = unindent(doc_string);
+        unindent_fragments(&mut self.doc_strings);
+    }
+}
+
+fn unindent_fragments(docs: &mut Vec<DocFragment>) {
+    for fragment in docs {
+        match *fragment {
+            DocFragment::SugaredDoc(_, _, ref mut doc_string) |
+            DocFragment::RawDoc(_, _, ref mut doc_string) |
+            DocFragment::Include(_, _, _, ref mut doc_string) =>
+                *doc_string = unindent(doc_string),
         }
     }
 }

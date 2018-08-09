@@ -57,21 +57,19 @@
 //! #![plugin(myplugin)]
 //! ```
 //!
-//! See the [`plugin` feature](../../unstable-book/language-features/plugin.html) of
+//! See the [`plugin` feature](../unstable-book/language-features/plugin.html) of
 //! the Unstable Book for more examples.
 
 #![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
        html_favicon_url = "https://doc.rust-lang.org/favicon.ico",
        html_root_url = "https://doc.rust-lang.org/nightly/")]
-#![deny(warnings)]
 
+#![cfg_attr(not(stage0), feature(nll))]
 #![feature(rustc_diagnostic_macros)]
-#![feature(staged_api)]
 
 #[macro_use] extern crate syntax;
 
 extern crate rustc;
-extern crate rustc_back;
 extern crate rustc_metadata;
 extern crate syntax_pos;
 extern crate rustc_errors as errors;

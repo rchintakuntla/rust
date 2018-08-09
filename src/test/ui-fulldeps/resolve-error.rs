@@ -13,8 +13,7 @@
 // aux-build:attr_proc_macro.rs
 // aux-build:bang_proc_macro.rs
 
-#![feature(proc_macro)]
-#![allow(unused_macros)]
+#![feature(custom_attribute)]
 
 #[macro_use]
 extern crate derive_foo;
@@ -35,29 +34,37 @@ macro_rules! attr_proc_mac {
 }
 
 #[derive(FooWithLongNan)]
+//~^ ERROR cannot find
 struct Foo;
 
-#[attr_proc_macra]
+#[attr_proc_macra] // OK, interpreted as a custom attribute
 struct Bar;
 
-#[FooWithLongNan]
+#[FooWithLongNan]  // OK, interpreted as a custom attribute
 struct Asdf;
 
 #[derive(Dlone)]
+//~^ ERROR cannot find
 struct A;
 
 #[derive(Dlona)]
+//~^ ERROR cannot find
 struct B;
 
 #[derive(attr_proc_macra)]
+//~^ ERROR cannot find
 struct C;
 
 fn main() {
     FooWithLongNama!();
+    //~^ ERROR cannot find
 
     attr_proc_macra!();
+    //~^ ERROR cannot find
 
     Dlona!();
+    //~^ ERROR cannot find
 
     bang_proc_macrp!();
+    //~^ ERROR cannot find
 }

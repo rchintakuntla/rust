@@ -28,7 +28,7 @@ pub type SimplifiedType = SimplifiedTypeGen<DefId>;
 /// because we sometimes need to use SimplifiedTypeGen values as stable sorting
 /// keys (in which case we use a DefPathHash as id-type) but in the general case
 /// the non-stable but fast to construct DefId-version is the better choice.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, RustcEncodable, RustcDecodable)]
 pub enum SimplifiedTypeGen<D>
     where D: Copy + Debug + Ord + Eq + Hash
 {
@@ -46,9 +46,11 @@ pub enum SimplifiedTypeGen<D>
     TraitSimplifiedType(D),
     ClosureSimplifiedType(D),
     GeneratorSimplifiedType(D),
+    GeneratorWitnessSimplifiedType(usize),
     AnonSimplifiedType(D),
     FunctionSimplifiedType(usize),
     ParameterSimplifiedType,
+    ForeignSimplifiedType(DefId),
 }
 
 /// Tries to simplify a type by dropping type parameters, deref'ing away any reference types, etc.
@@ -78,11 +80,11 @@ pub fn simplify_type<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
         ty::TyDynamic(ref trait_info, ..) => {
             trait_info.principal().map(|p| TraitSimplifiedType(p.def_id()))
         }
-        ty::TyRef(_, mt) => {
+        ty::TyRef(_, ty, _) => {
             // since we introduce auto-refs during method lookup, we
             // just treat &T and T as equivalent from the point of
             // view of possibly unifying
-            simplify_type(tcx, mt.ty, can_simplify_params)
+            simplify_type(tcx, ty, can_simplify_params)
         }
         ty::TyFnDef(def_id, _) |
         ty::TyClosure(def_id, _) => {
@@ -91,8 +93,11 @@ pub fn simplify_type<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
         ty::TyGenerator(def_id, _, _) => {
             Some(GeneratorSimplifiedType(def_id))
         }
+        ty::TyGeneratorWitness(ref tys) => {
+            Some(GeneratorWitnessSimplifiedType(tys.skip_binder().len()))
+        }
         ty::TyNever => Some(NeverSimplifiedType),
-        ty::TyTuple(ref tys, _) => {
+        ty::TyTuple(ref tys) => {
             Some(TupleSimplifiedType(tys.len()))
         }
         ty::TyFnPtr(ref f) => {
@@ -112,6 +117,9 @@ pub fn simplify_type<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
         }
         ty::TyAnon(def_id, _) => {
             Some(AnonSimplifiedType(def_id))
+        }
+        ty::TyForeign(def_id) => {
+            Some(ForeignSimplifiedType(def_id))
         }
         ty::TyInfer(_) | ty::TyError => None,
     }
@@ -137,19 +145,21 @@ impl<D: Copy + Debug + Ord + Eq + Hash> SimplifiedTypeGen<D> {
             TraitSimplifiedType(d) => TraitSimplifiedType(map(d)),
             ClosureSimplifiedType(d) => ClosureSimplifiedType(map(d)),
             GeneratorSimplifiedType(d) => GeneratorSimplifiedType(map(d)),
+            GeneratorWitnessSimplifiedType(n) => GeneratorWitnessSimplifiedType(n),
             AnonSimplifiedType(d) => AnonSimplifiedType(map(d)),
             FunctionSimplifiedType(n) => FunctionSimplifiedType(n),
             ParameterSimplifiedType => ParameterSimplifiedType,
+            ForeignSimplifiedType(d) => ForeignSimplifiedType(d),
         }
     }
 }
 
-impl<'gcx, D> HashStable<StableHashingContext<'gcx>> for SimplifiedTypeGen<D>
+impl<'a, 'gcx, D> HashStable<StableHashingContext<'a>> for SimplifiedTypeGen<D>
     where D: Copy + Debug + Ord + Eq + Hash +
-             HashStable<StableHashingContext<'gcx>>,
+             HashStable<StableHashingContext<'a>>,
 {
     fn hash_stable<W: StableHasherResult>(&self,
-                                          hcx: &mut StableHashingContext<'gcx>,
+                                          hcx: &mut StableHashingContext<'a>,
                                           hasher: &mut StableHasher<W>) {
         mem::discriminant(self).hash_stable(hcx, hasher);
         match *self {
@@ -170,8 +180,10 @@ impl<'gcx, D> HashStable<StableHashingContext<'gcx>> for SimplifiedTypeGen<D>
             TraitSimplifiedType(d) => d.hash_stable(hcx, hasher),
             ClosureSimplifiedType(d) => d.hash_stable(hcx, hasher),
             GeneratorSimplifiedType(d) => d.hash_stable(hcx, hasher),
+            GeneratorWitnessSimplifiedType(n) => n.hash_stable(hcx, hasher),
             AnonSimplifiedType(d) => d.hash_stable(hcx, hasher),
             FunctionSimplifiedType(n) => n.hash_stable(hcx, hasher),
+            ForeignSimplifiedType(d) => d.hash_stable(hcx, hasher),
         }
     }
 }

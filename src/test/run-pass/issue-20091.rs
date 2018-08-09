@@ -8,8 +8,10 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-emscripten
-#![feature(std_misc, os)]
+// ignore-cloudabi no processes
+// ignore-emscripten no processes
+
+#![feature(os)]
 
 #[cfg(unix)]
 fn main() {

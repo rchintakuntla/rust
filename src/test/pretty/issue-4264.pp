@@ -1,7 +1,7 @@
 #[prelude_import]
 use std::prelude::v1::*;
 #[macro_use]
-extern crate std as std;
+extern crate std;
 // Copyright 2014 The Rust Project Developers. See the COPYRIGHT
 // file at the top-level directory of this distribution and at
 // http://rust-lang.org/COPYRIGHT.
@@ -40,31 +40,31 @@ pub fn bar() ({
 
 
                   ((::fmt::format as
-                       fn(std::fmt::Arguments<'_>) -> std::string::String {std::fmt::format})(((<::std::fmt::Arguments>::new_v1
-                                                                                                   as
-                                                                                                   fn(&[&str], &[std::fmt::ArgumentV1<'_>]) -> std::fmt::Arguments<'_> {std::fmt::Arguments<'_>::new_v1})((&([("test"
-                                                                                                                                                                                                                  as
-                                                                                                                                                                                                                  &'static str)]
-                                                                                                                                                                                                                as
-                                                                                                                                                                                                                [&str; 1])
-                                                                                                                                                                                                              as
-                                                                                                                                                                                                              &[&str; 1]),
-                                                                                                                                                                                                          (&(match (()
-                                                                                                                                                                                                                       as
-                                                                                                                                                                                                                       ())
-                                                                                                                                                                                                                 {
-                                                                                                                                                                                                                 ()
-                                                                                                                                                                                                                 =>
-                                                                                                                                                                                                                 ([]
-                                                                                                                                                                                                                     as
-                                                                                                                                                                                                                     [std::fmt::ArgumentV1<'_>; 0]),
-                                                                                                                                                                                                             }
-                                                                                                                                                                                                                as
-                                                                                                                                                                                                                [std::fmt::ArgumentV1<'_>; 0])
-                                                                                                                                                                                                              as
-                                                                                                                                                                                                              &[std::fmt::ArgumentV1<'_>; 0]))
-                                                                                                  as
-                                                                                                  std::fmt::Arguments<'_>))
+                       for<'r> fn(std::fmt::Arguments<'r>) -> std::string::String {std::fmt::format})(((<::fmt::Arguments>::new_v1
+                                                                                                           as
+                                                                                                           fn(&[&str], &[std::fmt::ArgumentV1<'_>]) -> std::fmt::Arguments<'_> {std::fmt::Arguments<'_>::new_v1})((&([("test"
+                                                                                                                                                                                                                          as
+                                                                                                                                                                                                                          &'static str)]
+                                                                                                                                                                                                                        as
+                                                                                                                                                                                                                        [&str; 1])
+                                                                                                                                                                                                                      as
+                                                                                                                                                                                                                      &[&str; 1]),
+                                                                                                                                                                                                                  (&(match (()
+                                                                                                                                                                                                                               as
+                                                                                                                                                                                                                               ())
+                                                                                                                                                                                                                         {
+                                                                                                                                                                                                                         ()
+                                                                                                                                                                                                                         =>
+                                                                                                                                                                                                                         ([]
+                                                                                                                                                                                                                             as
+                                                                                                                                                                                                                             [std::fmt::ArgumentV1<'_>; 0]),
+                                                                                                                                                                                                                     }
+                                                                                                                                                                                                                        as
+                                                                                                                                                                                                                        [std::fmt::ArgumentV1<'_>; 0])
+                                                                                                                                                                                                                      as
+                                                                                                                                                                                                                      &[std::fmt::ArgumentV1<'_>; 0]))
+                                                                                                          as
+                                                                                                          std::fmt::Arguments<'_>))
                       as std::string::String);
               } as ())
 pub type Foo = [i32; (3 as usize)];

@@ -96,11 +96,11 @@ Using this flag looks like this:
 $ rustdoc src/lib.rs --crate-name mycrate
 ```
 
-By default, `rustodc` assumes that the name of your crate is the same name
+By default, `rustdoc` assumes that the name of your crate is the same name
 as the `.rs` file. `--crate-name` lets you override this assumption with
 whatever name you choose.
 
-## `-L`/`--library-path`: 
+## `-L`/`--library-path`: where to look for dependencies
 
 Using this flag looks like this:
 
@@ -140,6 +140,31 @@ $ rustdoc src/lib.rs --extern lazy-static=/path/to/lazy-static
 Similar to `--library-path`, `--extern` is about specifying the location
 of a dependency. `--library-path` provides directories to search in, `--extern`
 instead lets you specify exactly which dependency is located where.
+
+## `-C`/`--codegen`: pass codegen options to rustc
+
+Using this flag looks like this:
+
+```bash
+$ rustdoc src/lib.rs -C target_feature=+avx
+$ rustdoc src/lib.rs --codegen target_feature=+avx
+
+$ rustdoc --test src/lib.rs -C target_feature=+avx
+$ rustdoc --test src/lib.rs --codegen target_feature=+avx
+
+$ rustdoc --test README.md -C target_feature=+avx
+$ rustdoc --test README.md --codegen target_feature=+avx
+```
+
+When rustdoc generates documentation, looks for documentation tests, or executes documentation
+tests, it needs to compile some rust code, at least part-way. This flag allows you to tell rustdoc
+to provide some extra codegen options to rustc when it runs these compilations. Most of the time,
+these options won't affect a regular documentation run, but if something depends on target features
+to be enabled, or documentation tests need to use some additional options, this flag allows you to
+affect that.
+
+The arguments to this flag are the same as those for the `-C` flag on rustc. Run `rustc -C help` to
+get the full list.
 
 ## `--passes`: add more rustdoc passes
 
@@ -186,7 +211,7 @@ on documentation tests](documentation-tests.html).
 
 See also `--test-args`.
 
-## `--test-args`: 
+## `--test-args`: pass options to test runner
 
 Using this flag looks like this:
 
@@ -199,7 +224,7 @@ For more, see [the chapter on documentation tests](documentation-tests.html).
 
 See also `--test`.
 
-## `--target`: 
+## `--target`: generate documentation for the specified target triple
 
 Using this flag looks like this:
 
@@ -253,7 +278,7 @@ $ rustdoc README.md --html-before-content extra.html
 ```
 
 This flag takes a list of files, and inserts them inside the `<body>` tag but
-before the other content `rustodc` would normally produce in the rendered
+before the other content `rustdoc` would normally produce in the rendered
 documentation.
 
 ## `--html-after-content`: include more HTML after the content
@@ -266,7 +291,7 @@ $ rustdoc README.md --html-after-content extra.html
 ```
 
 This flag takes a list of files, and inserts them before the `</body>` tag but
-after the other content `rustodc` would normally produce in the rendered
+after the other content `rustdoc` would normally produce in the rendered
 documentation.
 
 
@@ -279,7 +304,7 @@ $ rustdoc README.md --markdown-playground-url https://play.rust-lang.org/
 ```
 
 When rendering a Markdown file, this flag gives the base URL of the Rust
-Playround, to use for generating `Run` buttons.
+Playground, to use for generating `Run` buttons.
 
 
 ## `--markdown-no-toc`: don't generate a table of contents
@@ -291,7 +316,7 @@ $ rustdoc README.md --markdown-no-toc
 ```
 
 When generating documentation from a Markdown file, by default, `rustdoc` will
-generate a table of contents. This flag supresses that, and no TOC will be
+generate a table of contents. This flag suppresses that, and no TOC will be
 generated.
 
 

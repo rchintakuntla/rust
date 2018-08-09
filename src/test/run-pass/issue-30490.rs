@@ -8,7 +8,8 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-emscripten
+// ignore-cloudabi no processes
+// ignore-emscripten no processes
 
 // Previously libstd would set stdio descriptors of a child process
 // by `dup`ing the requested descriptors to inherit directly into the

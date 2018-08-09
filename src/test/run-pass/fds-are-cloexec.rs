@@ -10,7 +10,8 @@
 
 // ignore-windows
 // ignore-android
-// ignore-emscripten
+// ignore-cloudabi no processes
+// ignore-emscripten no processes
 // ignore-haiku
 
 #![feature(libc)]

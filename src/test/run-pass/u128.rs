@@ -8,9 +8,11 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-// ignore-emscripten
+// ignore-emscripten u128 not supported
 
-#![feature(i128_type, test)]
+// compile-flags: -Z borrowck=compare
+
+#![feature(test)]
 
 extern crate test;
 use test::black_box as b;
