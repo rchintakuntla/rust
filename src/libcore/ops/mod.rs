@@ -1,13 +1,3 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Overloadable operators.
 //!
 //! Implementing these traits allows you to overload certain operators.
@@ -27,7 +17,7 @@
 //! should have some resemblance to multiplication (and share expected
 //! properties like associativity).
 //!
-//! Note that the `&&` and `||` operators short-circuit, i.e. they only
+//! Note that the `&&` and `||` operators short-circuit, i.e., they only
 //! evaluate their second operand if it contributes to the result. Since this
 //! behavior is not enforceable by traits, `&&` and `||` are not supported as
 //! overloadable operators.
@@ -162,21 +152,24 @@ mod function;
 mod generator;
 mod index;
 mod range;
-mod try;
+mod r#try;
 mod unsize;
 
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use self::arith::{Add, Sub, Mul, Div, Rem, Neg};
+pub use self::arith::{Add, Div, Mul, Neg, Rem, Sub};
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
-pub use self::arith::{AddAssign, SubAssign, MulAssign, DivAssign, RemAssign};
+pub use self::arith::{AddAssign, DivAssign, MulAssign, RemAssign, SubAssign};
 
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use self::bit::{Not, BitAnd, BitOr, BitXor, Shl, Shr};
+pub use self::bit::{BitAnd, BitOr, BitXor, Not, Shl, Shr};
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
 pub use self::bit::{BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign};
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::deref::{Deref, DerefMut};
+
+#[unstable(feature = "receiver_trait", issue = "none")]
+pub use self::deref::Receiver;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::drop::Drop;
@@ -191,13 +184,16 @@ pub use self::index::{Index, IndexMut};
 pub use self::range::{Range, RangeFrom, RangeFull, RangeTo};
 
 #[stable(feature = "inclusive_range", since = "1.26.0")]
-pub use self::range::{RangeInclusive, RangeToInclusive, RangeBounds, Bound};
+pub use self::range::{Bound, RangeBounds, RangeInclusive, RangeToInclusive};
 
 #[unstable(feature = "try_trait", issue = "42327")]
-pub use self::try::Try;
+pub use self::r#try::Try;
 
 #[unstable(feature = "generator_trait", issue = "43122")]
 pub use self::generator::{Generator, GeneratorState};
 
 #[unstable(feature = "coerce_unsized", issue = "27732")]
 pub use self::unsize::CoerceUnsized;
+
+#[unstable(feature = "dispatch_from_dyn", issue = "none")]
+pub use self::unsize::DispatchFromDyn;

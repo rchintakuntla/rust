@@ -1,14 +1,3 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-
 // This test case tests the incremental compilation hash (ICH) implementation
 // for function interfaces.
 
@@ -16,13 +5,12 @@
 // and make sure that the hash has changed, then change nothing between rev2 and
 // rev3 and make sure that the hash has not changed.
 
-// compile-pass
+// build-pass (FIXME(62277): could be check-pass?)
 // revisions: cfail1 cfail2 cfail3
 // compile-flags: -Z query-dep-graph -Zincremental-ignore-spans
 
 
 #![allow(warnings)]
-#![feature(intrinsics)]
 #![feature(linkage)]
 #![feature(rustc_attrs)]
 #![crate_type = "rlib"]
@@ -35,7 +23,7 @@ pub fn add_parameter() {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+              except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn add_parameter(p: i32) {}
 
@@ -58,7 +46,7 @@ pub fn type_of_parameter(p: i32) {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+              except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn type_of_parameter(p: i64) {}
 
@@ -70,7 +58,7 @@ pub fn type_of_parameter_ref(p: &i32) {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+              except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn type_of_parameter_ref(p: &mut i32) {}
 
@@ -82,7 +70,7 @@ pub fn order_of_parameters(p1: i32, p2: i64) {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+              except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn order_of_parameters(p2: i64, p1: i32) {}
 
@@ -94,7 +82,7 @@ pub fn make_unsafe() {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+              except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub unsafe fn make_unsafe() {}
 
@@ -105,20 +93,9 @@ pub unsafe fn make_unsafe() {}
 pub fn make_extern() {}
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, TypeckTables, FnSignature")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub extern "C" fn make_extern() {}
-
-
-// Extern C Extern Rust-Intrinsic ----------------------------------------------
-
-#[cfg(cfail1)]
-pub extern "C" fn make_intrinsic() {}
-
-#[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, TypeckTables, FnSignature")]
-#[rustc_clean(cfg = "cfail3")]
-pub extern "rust-intrinsic" fn make_intrinsic() {}
 
 
 // Type Parameter --------------------------------------------------------------
@@ -128,7 +105,7 @@ pub fn type_parameter() {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, GenericsOfItem, TypeOfItem, PredicatesOfItem")]
+              except = "Hir, HirBody, generics_of, type_of, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn type_parameter<T>() {}
 
@@ -139,7 +116,7 @@ pub fn type_parameter<T>() {}
 pub fn lifetime_parameter() {}
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, GenericsOfItem")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, generics_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn lifetime_parameter<'a>() {}
 
@@ -150,7 +127,7 @@ pub fn lifetime_parameter<'a>() {}
 pub fn trait_bound<T>() {}
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, PredicatesOfItem")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn trait_bound<T: Eq>() {}
 
@@ -161,7 +138,7 @@ pub fn trait_bound<T: Eq>() {}
 pub fn builtin_bound<T>() {}
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, PredicatesOfItem")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn builtin_bound<T: Send>() {}
 
@@ -173,7 +150,7 @@ pub fn lifetime_bound<'a, T>() {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, GenericsOfItem, TypeOfItem, PredicatesOfItem")]
+              except = "Hir, HirBody, generics_of, type_of, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn lifetime_bound<'a, T: 'a>() {}
 
@@ -184,7 +161,7 @@ pub fn lifetime_bound<'a, T: 'a>() {}
 pub fn second_trait_bound<T: Eq>() {}
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, PredicatesOfItem")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn second_trait_bound<T: Eq + Clone>() {}
 
@@ -195,7 +172,7 @@ pub fn second_trait_bound<T: Eq + Clone>() {}
 pub fn second_builtin_bound<T: Send>() {}
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, PredicatesOfItem")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn second_builtin_bound<T: Send + Sized>() {}
 
@@ -207,7 +184,7 @@ pub fn second_lifetime_bound<'a, 'b, T: 'a>() {}
 
 #[cfg(not(cfail1))]
 #[rustc_clean(cfg = "cfail2",
-              except = "Hir, HirBody, GenericsOfItem, TypeOfItem, PredicatesOfItem")]
+              except = "Hir, HirBody, generics_of, type_of, predicates_of")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn second_lifetime_bound<'a, 'b, T: 'a + 'b>() {}
 
@@ -269,7 +246,7 @@ pub fn return_impl_trait() -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, TypeckTables, FnSignature")]
+#[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, typeck_tables_of, fn_sig")]
 #[rustc_clean(cfg = "cfail3")]
 pub fn return_impl_trait() -> impl Clone {
     0
@@ -303,7 +280,7 @@ pub mod change_return_type_indirectly {
     use super::ReferencedType2 as ReturnType;
 
     #[rustc_clean(cfg = "cfail2",
-                  except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+                  except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
     #[rustc_clean(cfg = "cfail3")]
     pub fn indirect_return_type() -> ReturnType {
         ReturnType {}
@@ -320,7 +297,7 @@ pub mod change_parameter_type_indirectly {
     use super::ReferencedType2 as ParameterType;
 
     #[rustc_clean(cfg = "cfail2",
-                  except = "Hir, HirBody, MirValidated, MirOptimized, TypeckTables, FnSignature")]
+                  except = "Hir, HirBody, mir_built, optimized_mir, typeck_tables_of, fn_sig")]
     #[rustc_clean(cfg = "cfail3")]
     pub fn indirect_parameter_type(p: ParameterType) {}
 }
@@ -337,7 +314,7 @@ pub mod change_trait_bound_indirectly {
     #[cfg(not(cfail1))]
     use super::ReferencedTrait2 as Trait;
 
-    #[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, PredicatesOfItem")]
+    #[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, predicates_of")]
     #[rustc_clean(cfg = "cfail3")]
     pub fn indirect_trait_bound<T: Trait>(p: T) {}
 }
@@ -351,7 +328,7 @@ pub mod change_trait_bound_indirectly_in_where_clause {
     #[cfg(not(cfail1))]
     use super::ReferencedTrait2 as Trait;
 
-    #[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, PredicatesOfItem")]
+    #[rustc_clean(cfg = "cfail2", except = "Hir, HirBody, predicates_of")]
     #[rustc_clean(cfg = "cfail3")]
     pub fn indirect_trait_bound_where<T>(p: T)
     where

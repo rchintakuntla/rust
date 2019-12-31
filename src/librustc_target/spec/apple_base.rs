@@ -1,16 +1,6 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::env;
 
-use spec::{LinkArgs, TargetOptions};
+use crate::spec::{LinkArgs, TargetOptions};
 
 pub fn opts() -> TargetOptions {
     // ELF TLS is only available in macOS 10.7+. If you try to compile for 10.6
@@ -24,13 +14,7 @@ pub fn opts() -> TargetOptions {
     //
     // Here we detect what version is being requested, defaulting to 10.7. ELF
     // TLS is flagged as enabled if it looks to be supported.
-    let deployment_target = env::var("MACOSX_DEPLOYMENT_TARGET").ok();
-    let version = deployment_target.as_ref().and_then(|s| {
-        let mut i = s.splitn(2, '.');
-        i.next().and_then(|a| i.next().map(|b| (a, b)))
-    }).and_then(|(a, b)| {
-        a.parse::<u32>().and_then(|a| b.parse::<u32>().map(|b| (a, b))).ok()
-    }).unwrap_or((10, 7));
+    let version = macos_deployment_target();
 
     TargetOptions {
         // macOS has -dead_strip, which doesn't rely on function_sections
@@ -44,10 +28,43 @@ pub fn opts() -> TargetOptions {
         dll_suffix: ".dylib".to_string(),
         archive_format: "bsd".to_string(),
         pre_link_args: LinkArgs::new(),
-        exe_allocation_crate: super::maybe_jemalloc(),
         has_elf_tls: version >= (10, 7),
         abi_return_struct_as_int: true,
         emit_debug_gdb_scripts: false,
-        .. Default::default()
+        ..Default::default()
     }
+}
+
+fn macos_deployment_target() -> (u32, u32) {
+    let deployment_target = env::var("MACOSX_DEPLOYMENT_TARGET").ok();
+    let version = deployment_target
+        .as_ref()
+        .and_then(|s| {
+            let mut i = s.splitn(2, '.');
+            i.next().and_then(|a| i.next().map(|b| (a, b)))
+        })
+        .and_then(|(a, b)| a.parse::<u32>().and_then(|a| b.parse::<u32>().map(|b| (a, b))).ok());
+
+    version.unwrap_or((10, 7))
+}
+
+pub fn macos_llvm_target(arch: &str) -> String {
+    let (major, minor) = macos_deployment_target();
+    format!("{}-apple-macosx{}.{}.0", arch, major, minor)
+}
+
+pub fn macos_link_env_remove() -> Vec<String> {
+    let mut env_remove = Vec::with_capacity(2);
+    // Remove the `SDKROOT` environment variable if it's clearly set for the wrong platform, which
+    // may occur when we're linking a custom build script while targeting iOS for example.
+    if let Some(sdkroot) = env::var("SDKROOT").ok() {
+        if sdkroot.contains("iPhoneOS.platform") || sdkroot.contains("iPhoneSimulator.platform") {
+            env_remove.push("SDKROOT".to_string())
+        }
+    }
+    // Additionally, `IPHONEOS_DEPLOYMENT_TARGET` must not be set when using the Xcode linker at
+    // "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld",
+    // although this is apparently ignored when using the linker at "/usr/bin/ld".
+    env_remove.push("IPHONEOS_DEPLOYMENT_TARGET".to_string());
+    env_remove
 }

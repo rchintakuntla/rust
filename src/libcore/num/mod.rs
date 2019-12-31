@@ -1,32 +1,23 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+// ignore-tidy-filelength
 
 //! Numeric traits and functions for the built-in numeric types.
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use convert::TryFrom;
-use fmt;
-use intrinsics;
-use mem;
-use nonzero::NonZero;
-use ops;
-use str::FromStr;
+use crate::convert::Infallible;
+use crate::fmt;
+use crate::intrinsics;
+use crate::mem;
+use crate::ops;
+use crate::str::FromStr;
 
 macro_rules! impl_nonzero_fmt {
-    ( ( $( $Trait: ident ),+ ) for $Ty: ident ) => {
+    ( #[$stability: meta] ( $( $Trait: ident ),+ ) for $Ty: ident ) => {
         $(
-            #[stable(feature = "nonzero", since = "1.28.0")]
+            #[$stability]
             impl fmt::$Trait for $Ty {
                 #[inline]
-                fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     self.get().fmt(f)
                 }
             }
@@ -34,74 +25,120 @@ macro_rules! impl_nonzero_fmt {
     }
 }
 
+macro_rules! doc_comment {
+    ($x:expr, $($tt:tt)*) => {
+        #[doc = $x]
+        $($tt)*
+    };
+}
+
 macro_rules! nonzero_integers {
-    ( $( $Ty: ident($Int: ty); )+ ) => {
+    ( $( #[$stability: meta] $Ty: ident($Int: ty); )+ ) => {
         $(
-            /// An integer that is known not to equal zero.
-            ///
-            /// This enables some memory layout optimization.
-            /// For example, `Option<NonZeroU32>` is the same size as `u32`:
-            ///
-            /// ```rust
-            /// use std::mem::size_of;
-            /// assert_eq!(size_of::<Option<std::num::NonZeroU32>>(), size_of::<u32>());
-            /// ```
-            #[stable(feature = "nonzero", since = "1.28.0")]
-            #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
-            #[repr(transparent)]
-            pub struct $Ty(NonZero<$Int>);
+            doc_comment! {
+                concat!("An integer that is known not to equal zero.
+
+This enables some memory layout optimization.
+For example, `Option<", stringify!($Ty), ">` is the same size as `", stringify!($Int), "`:
+
+```rust
+use std::mem::size_of;
+assert_eq!(size_of::<Option<core::num::", stringify!($Ty), ">>(), size_of::<", stringify!($Int),
+">());
+```"),
+                #[$stability]
+                #[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash)]
+                #[repr(transparent)]
+                #[rustc_layout_scalar_valid_range_start(1)]
+                #[rustc_nonnull_optimization_guaranteed]
+                pub struct $Ty($Int);
+            }
 
             impl $Ty {
-                /// Create a non-zero without checking the value.
+                /// Creates a non-zero without checking the value.
                 ///
                 /// # Safety
                 ///
                 /// The value must not be zero.
-                #[stable(feature = "nonzero", since = "1.28.0")]
+                #[$stability]
+                #[rustc_const_stable(feature = "nonzero", since = "1.34.0")]
                 #[inline]
                 pub const unsafe fn new_unchecked(n: $Int) -> Self {
-                    $Ty(NonZero(n))
+                    Self(n)
                 }
 
-                /// Create a non-zero if the given value is not zero.
-                #[stable(feature = "nonzero", since = "1.28.0")]
+                /// Creates a non-zero if the given value is not zero.
+                #[$stability]
                 #[inline]
                 pub fn new(n: $Int) -> Option<Self> {
                     if n != 0 {
-                        Some($Ty(NonZero(n)))
+                        // SAFETY: we just checked that there's no `0`
+                        Some(unsafe { Self(n) })
                     } else {
                         None
                     }
                 }
 
                 /// Returns the value as a primitive type.
-                #[stable(feature = "nonzero", since = "1.28.0")]
+                #[$stability]
                 #[inline]
-                pub fn get(self) -> $Int {
-                    self.0 .0
+                #[rustc_const_stable(feature = "nonzero", since = "1.34.0")]
+                pub const fn get(self) -> $Int {
+                    self.0
                 }
 
             }
 
+            #[stable(feature = "from_nonzero", since = "1.31.0")]
+            impl From<$Ty> for $Int {
+                fn from(nonzero: $Ty) -> Self {
+                    nonzero.0
+                }
+            }
+
             impl_nonzero_fmt! {
-                (Debug, Display, Binary, Octal, LowerHex, UpperHex) for $Ty
+                #[$stability] (Debug, Display, Binary, Octal, LowerHex, UpperHex) for $Ty
             }
         )+
     }
 }
 
 nonzero_integers! {
-    NonZeroU8(u8);
-    NonZeroU16(u16);
-    NonZeroU32(u32);
-    NonZeroU64(u64);
-    NonZeroU128(u128);
-    NonZeroUsize(usize);
+    #[stable(feature = "nonzero", since = "1.28.0")] NonZeroU8(u8);
+    #[stable(feature = "nonzero", since = "1.28.0")] NonZeroU16(u16);
+    #[stable(feature = "nonzero", since = "1.28.0")] NonZeroU32(u32);
+    #[stable(feature = "nonzero", since = "1.28.0")] NonZeroU64(u64);
+    #[stable(feature = "nonzero", since = "1.28.0")] NonZeroU128(u128);
+    #[stable(feature = "nonzero", since = "1.28.0")] NonZeroUsize(usize);
+    #[stable(feature = "signed_nonzero", since = "1.34.0")] NonZeroI8(i8);
+    #[stable(feature = "signed_nonzero", since = "1.34.0")] NonZeroI16(i16);
+    #[stable(feature = "signed_nonzero", since = "1.34.0")] NonZeroI32(i32);
+    #[stable(feature = "signed_nonzero", since = "1.34.0")] NonZeroI64(i64);
+    #[stable(feature = "signed_nonzero", since = "1.34.0")] NonZeroI128(i128);
+    #[stable(feature = "signed_nonzero", since = "1.34.0")] NonZeroIsize(isize);
 }
+
+macro_rules! from_str_radix_nzint_impl {
+    ($($t:ty)*) => {$(
+        #[stable(feature = "nonzero_parse", since = "1.35.0")]
+        impl FromStr for $t {
+            type Err = ParseIntError;
+            fn from_str(src: &str) -> Result<Self, Self::Err> {
+                Self::new(from_str_radix(src, 10)?)
+                    .ok_or(ParseIntError {
+                        kind: IntErrorKind::Zero
+                    })
+            }
+        }
+    )*}
+}
+
+from_str_radix_nzint_impl! { NonZeroU8 NonZeroU16 NonZeroU32 NonZeroU64 NonZeroU128 NonZeroUsize
+NonZeroI8 NonZeroI16 NonZeroI32 NonZeroI64 NonZeroI128 NonZeroIsize }
 
 /// Provides intentionally-wrapped arithmetic on `T`.
 ///
-/// Operations like `+` on `u32` values is intended to never overflow,
+/// Operations like `+` on `u32` values are intended to never overflow,
 /// and in some debug configurations overflow is detected and results
 /// in a panic. While most arithmetic falls into this category, some
 /// code explicitly expects and relies upon modular arithmetic (e.g.,
@@ -111,6 +148,9 @@ nonzero_integers! {
 /// `wrapping_add`, or through the `Wrapping<T>` type, which says that
 /// all standard arithmetic operations on the underlying value are
 /// intended to have wrapping semantics.
+///
+/// The underlying value can be retrieved through the `.0` index of the
+/// `Wrapping` tuple.
 ///
 /// # Examples
 ///
@@ -125,70 +165,85 @@ nonzero_integers! {
 #[stable(feature = "rust1", since = "1.0.0")]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Default, Hash)]
 #[repr(transparent)]
-pub struct Wrapping<T>(#[stable(feature = "rust1", since = "1.0.0")]
-                       pub T);
+pub struct Wrapping<T>(#[stable(feature = "rust1", since = "1.0.0")] pub T);
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: fmt::Debug> fmt::Debug for Wrapping<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 #[stable(feature = "wrapping_display", since = "1.10.0")]
 impl<T: fmt::Display> fmt::Display for Wrapping<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 #[stable(feature = "wrapping_fmt", since = "1.11.0")]
 impl<T: fmt::Binary> fmt::Binary for Wrapping<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 #[stable(feature = "wrapping_fmt", since = "1.11.0")]
 impl<T: fmt::Octal> fmt::Octal for Wrapping<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 #[stable(feature = "wrapping_fmt", since = "1.11.0")]
 impl<T: fmt::LowerHex> fmt::LowerHex for Wrapping<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 #[stable(feature = "wrapping_fmt", since = "1.11.0")]
 impl<T: fmt::UpperHex> fmt::UpperHex for Wrapping<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }
 
 // All these modules are technically private and only exposed for coretests:
-pub mod flt2dec;
-pub mod dec2flt;
 pub mod bignum;
+pub mod dec2flt;
 pub mod diy_float;
-
-macro_rules! doc_comment {
-    ($x:expr, $($tt:tt)*) => {
-        #[doc = $x]
-        $($tt)*
-    };
-}
+pub mod flt2dec;
 
 mod wrapping;
 
-// `Int` + `SignedInt` implemented for signed integers
+macro_rules! usize_isize_to_xe_bytes_doc {
+    () => {
+        "
+
+**Note**: This function returns an array of length 2, 4 or 8 bytes
+depending on the target pointer size.
+
+"
+    };
+}
+
+macro_rules! usize_isize_from_xe_bytes_doc {
+    () => {
+        "
+
+**Note**: This function takes an array of length 2, 4 or 8 bytes
+depending on the target pointer size.
+
+"
+    };
+}
+
 macro_rules! int_impl {
     ($SelfT:ty, $ActualT:ident, $UnsignedT:ty, $BITS:expr, $Min:expr, $Max:expr, $Feature:expr,
-     $EndFeature:expr, $rot:expr, $rot_op:expr, $rot_result:expr) => {
+     $EndFeature:expr, $rot:expr, $rot_op:expr, $rot_result:expr, $swap_op:expr, $swapped:expr,
+     $reversed:expr, $le_bytes:expr, $be_bytes:expr,
+     $to_xe_bytes_doc:expr, $from_xe_bytes_doc:expr) => {
         doc_comment! {
             concat!("Returns the smallest value that can be represented by this integer type.
 
@@ -201,7 +256,9 @@ Basic usage:
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
+            #[inline(always)]
+            #[rustc_promotable]
+            #[rustc_const_stable(feature = "const_min_value", since = "1.32.0")]
             pub const fn min_value() -> Self {
                 !0 ^ ((!0 as $UnsignedT) >> 1) as Self
             }
@@ -219,7 +276,9 @@ Basic usage:
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
+            #[inline(always)]
+            #[rustc_promotable]
+            #[rustc_const_stable(feature = "const_max_value", since = "1.32.0")]
             pub const fn max_value() -> Self {
                 !Self::min_value()
             }
@@ -269,7 +328,7 @@ $EndFeature, "
 ```
 "),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
             pub const fn count_ones(self) -> u32 { (self as $UnsignedT).count_ones() }
         }
@@ -285,7 +344,7 @@ Basic usage:
 ", $Feature, "assert_eq!(", stringify!($SelfT), "::max_value().count_zeros(), 1);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
             pub const fn count_zeros(self) -> u32 {
                 (!self).count_ones()
@@ -306,7 +365,7 @@ assert_eq!(n.leading_zeros(), 0);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
             pub const fn leading_zeros(self) -> u32 {
                 (self as $UnsignedT).leading_zeros()
@@ -327,7 +386,7 @@ assert_eq!(n.trailing_zeros(), 2);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
             pub const fn trailing_zeros(self) -> u32 {
                 (self as $UnsignedT).trailing_zeros()
@@ -338,7 +397,7 @@ $EndFeature, "
             concat!("Shifts the bits to the left by a specified amount, `n`,
 wrapping the truncated bits to the end of the resulting integer.
 
-Please note this isn't the same operation as `<<`!
+Please note this isn't the same operation as the `<<` shifting operator!
 
 # Examples
 
@@ -351,8 +410,11 @@ let m = ", $rot_result, ";
 assert_eq!(n.rotate_left(", $rot, "), m);
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn rotate_left(self, n: u32) -> Self {
+            pub const fn rotate_left(self, n: u32) -> Self {
                 (self as $UnsignedT).rotate_left(n) as Self
             }
         }
@@ -362,7 +424,7 @@ assert_eq!(n.rotate_left(", $rot, "), m);
 wrapping the truncated bits to the beginning of the resulting
 integer.
 
-Please note this isn't the same operation as `>>`!
+Please note this isn't the same operation as the `>>` shifting operator!
 
 # Examples
 
@@ -375,60 +437,57 @@ let m = ", $rot_op, ";
 assert_eq!(n.rotate_right(", $rot, "), m);
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn rotate_right(self, n: u32) -> Self {
+            pub const fn rotate_right(self, n: u32) -> Self {
                 (self as $UnsignedT).rotate_right(n) as Self
             }
         }
-        /// Reverses the byte order of the integer.
-        ///
-        /// # Examples
-        ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `i16` is used here.
-        ///
-        /// Basic usage:
-        ///
-        /// ```
-        /// let n: i16 = 0b0000000_01010101;
-        /// assert_eq!(n, 85);
-        ///
-        /// let m = n.swap_bytes();
-        ///
-        /// assert_eq!(m, 0b01010101_00000000);
-        /// assert_eq!(m, 21760);
-        /// ```
-        #[stable(feature = "rust1", since = "1.0.0")]
-        #[rustc_const_unstable(feature = "const_int_ops")]
-        #[inline]
-        pub const fn swap_bytes(self) -> Self {
-            (self as $UnsignedT).swap_bytes() as Self
+
+        doc_comment! {
+            concat!("Reverses the byte order of the integer.
+
+# Examples
+
+Basic usage:
+
+```
+let n = ", $swap_op, stringify!($SelfT), ";
+
+let m = n.swap_bytes();
+
+assert_eq!(m, ", $swapped, ");
+```"),
+            #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[inline]
+            pub const fn swap_bytes(self) -> Self {
+                (self as $UnsignedT).swap_bytes() as Self
+            }
         }
 
-        /// Reverses the bit pattern of the integer.
-        ///
-        /// # Examples
-        ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `i16` is used here.
-        ///
-        /// Basic usage:
-        ///
-        /// ```
-        /// #![feature(reverse_bits)]
-        ///
-        /// let n: i16 = 0b0000000_01010101;
-        /// assert_eq!(n, 85);
-        ///
-        /// let m = n.reverse_bits();
-        ///
-        /// assert_eq!(m as u16, 0b10101010_00000000);
-        /// assert_eq!(m, -22016);
-        /// ```
-        #[unstable(feature = "reverse_bits", issue = "48763")]
-        #[inline]
-        pub fn reverse_bits(self) -> Self {
-            (self as $UnsignedT).reverse_bits() as Self
+        doc_comment! {
+            concat!("Reverses the bit pattern of the integer.
+
+# Examples
+
+Basic usage:
+
+```
+let n = ", $swap_op, stringify!($SelfT), ";
+let m = n.reverse_bits();
+
+assert_eq!(m, ", $reversed, ");
+```"),
+            #[stable(feature = "reverse_bits", since = "1.37.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[inline]
+            #[must_use]
+            pub const fn reverse_bits(self) -> Self {
+                (self as $UnsignedT).reverse_bits() as Self
+            }
         }
 
         doc_comment! {
@@ -451,7 +510,7 @@ if cfg!(target_endian = \"big\") {
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_conversions", since = "1.32.0")]
             #[inline]
             pub const fn from_be(x: Self) -> Self {
                 #[cfg(target_endian = "big")]
@@ -485,7 +544,7 @@ if cfg!(target_endian = \"little\") {
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_conversions", since = "1.32.0")]
             #[inline]
             pub const fn from_le(x: Self) -> Self {
                 #[cfg(target_endian = "little")]
@@ -519,7 +578,7 @@ if cfg!(target_endian = \"big\") {
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_conversions", since = "1.32.0")]
             #[inline]
             pub const fn to_be(self) -> Self { // or not to be?
                 #[cfg(target_endian = "big")]
@@ -553,7 +612,7 @@ if cfg!(target_endian = \"little\") {
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_int_conversions", since = "1.32.0")]
             #[inline]
             pub const fn to_le(self) -> Self {
                 #[cfg(target_endian = "little")]
@@ -582,6 +641,8 @@ assert_eq!((", stringify!($SelfT), "::max_value() - 2).checked_add(3), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_add(self, rhs: Self) -> Option<Self> {
                 let (a, b) = self.overflowing_add(rhs);
@@ -604,6 +665,8 @@ assert_eq!((", stringify!($SelfT), "::min_value() + 2).checked_sub(3), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_sub(self, rhs: Self) -> Option<Self> {
                 let (a, b) = self.overflowing_sub(rhs);
@@ -626,6 +689,8 @@ assert_eq!(", stringify!($SelfT), "::max_value().checked_mul(2), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_mul(self, rhs: Self) -> Option<Self> {
                 let (a, b) = self.overflowing_mul(rhs);
@@ -649,18 +714,21 @@ assert_eq!((1", stringify!($SelfT), ").checked_div(0), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_div(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::min_value() && rhs == -1) {
                     None
                 } else {
+                    // SAFETY: div by zero and by INT_MIN have been checked above
                     Some(unsafe { intrinsics::unchecked_div(self, rhs) })
                 }
             }
         }
 
         doc_comment! {
-            concat!("Checked Euclidean division. Computes `self.div_euc(rhs)`,
+            concat!("Checked Euclidean division. Computes `self.div_euclid(rhs)`,
 returning `None` if `rhs == 0` or the division results in overflow.
 
 # Examples
@@ -668,19 +736,20 @@ returning `None` if `rhs == 0` or the division results in overflow.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
 assert_eq!((", stringify!($SelfT),
-"::min_value() + 1).checked_div_euc(-1), Some(", stringify!($Max), "));
-assert_eq!(", stringify!($SelfT), "::min_value().checked_div_euc(-1), None);
-assert_eq!((1", stringify!($SelfT), ").checked_div_euc(0), None);
+"::min_value() + 1).checked_div_euclid(-1), Some(", stringify!($Max), "));
+assert_eq!(", stringify!($SelfT), "::min_value().checked_div_euclid(-1), None);
+assert_eq!((1", stringify!($SelfT), ").checked_div_euclid(0), None);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn checked_div_euc(self, rhs: Self) -> Option<Self> {
+            pub fn checked_div_euclid(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::min_value() && rhs == -1) {
                     None
                 } else {
-                    Some(self.div_euc(rhs))
+                    Some(self.div_euclid(rhs))
                 }
             }
         }
@@ -702,39 +771,43 @@ assert_eq!(", stringify!($SelfT), "::MIN.checked_rem(-1), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_rem(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::min_value() && rhs == -1) {
                     None
                 } else {
+                    // SAFETY: div by zero and by INT_MIN have been checked above
                     Some(unsafe { intrinsics::unchecked_rem(self, rhs) })
                 }
             }
         }
 
         doc_comment! {
-            concat!("Checked Euclidean modulo. Computes `self.mod_euc(rhs)`, returning `None` if
-`rhs == 0` or the division results in overflow.
+            concat!("Checked Euclidean remainder. Computes `self.rem_euclid(rhs)`, returning `None`
+if `rhs == 0` or the division results in overflow.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
 use std::", stringify!($SelfT), ";
 
-assert_eq!(5", stringify!($SelfT), ".checked_mod_euc(2), Some(1));
-assert_eq!(5", stringify!($SelfT), ".checked_mod_euc(0), None);
-assert_eq!(", stringify!($SelfT), "::MIN.checked_mod_euc(-1), None);
+assert_eq!(5", stringify!($SelfT), ".checked_rem_euclid(2), Some(1));
+assert_eq!(5", stringify!($SelfT), ".checked_rem_euclid(0), None);
+assert_eq!(", stringify!($SelfT), "::MIN.checked_rem_euclid(-1), None);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn checked_mod_euc(self, rhs: Self) -> Option<Self> {
+            pub fn checked_rem_euclid(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 || (self == Self::min_value() && rhs == -1) {
                     None
                 } else {
-                    Some(self.mod_euc(rhs))
+                    Some(self.rem_euclid(rhs))
                 }
             }
         }
@@ -775,6 +848,8 @@ assert_eq!(0x1", stringify!($SelfT), ".checked_shl(129), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_shl(self, rhs: u32) -> Option<Self> {
                 let (a, b) = self.overflowing_shl(rhs);
@@ -796,6 +871,8 @@ assert_eq!(0x10", stringify!($SelfT), ".checked_shr(128), None);",
 $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_shr(self, rhs: u32) -> Option<Self> {
                 let (a, b) = self.overflowing_shr(rhs);
@@ -838,13 +915,14 @@ overflow occurred.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "assert_eq!(8", stringify!($SelfT), ".checked_pow(2), Some(64));
 assert_eq!(", stringify!($SelfT), "::max_value().checked_pow(2), None);",
 $EndFeature, "
 ```"),
 
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_pow(self, mut exp: u32) -> Option<Self> {
                 let mut base = self;
@@ -880,17 +958,19 @@ Basic usage:
 ```
 ", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_add(1), 101);
 assert_eq!(", stringify!($SelfT), "::max_value().saturating_add(100), ", stringify!($SelfT),
-"::max_value());",
+"::max_value());
+assert_eq!(", stringify!($SelfT), "::min_value().saturating_add(-1), ", stringify!($SelfT),
+"::min_value());",
 $EndFeature, "
 ```"),
+
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_unstable(feature = "const_saturating_int_methods", issue = "53718")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn saturating_add(self, rhs: Self) -> Self {
-                match self.checked_add(rhs) {
-                    Some(x) => x,
-                    None if rhs >= 0 => Self::max_value(),
-                    None => Self::min_value(),
-                }
+            pub const fn saturating_add(self, rhs: Self) -> Self {
+                intrinsics::saturating_add(self, rhs)
             }
         }
 
@@ -905,16 +985,73 @@ Basic usage:
 ```
 ", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_sub(127), -27);
 assert_eq!(", stringify!($SelfT), "::min_value().saturating_sub(100), ", stringify!($SelfT),
-"::min_value());",
+"::min_value());
+assert_eq!(", stringify!($SelfT), "::max_value().saturating_sub(-1), ", stringify!($SelfT),
+"::max_value());",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_unstable(feature = "const_saturating_int_methods", issue = "53718")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn saturating_sub(self, rhs: Self) -> Self {
-                match self.checked_sub(rhs) {
-                    Some(x) => x,
-                    None if rhs >= 0 => Self::min_value(),
-                    None => Self::max_value(),
+            pub const fn saturating_sub(self, rhs: Self) -> Self {
+                intrinsics::saturating_sub(self, rhs)
+            }
+        }
+
+        doc_comment! {
+            concat!("Saturating integer negation. Computes `-self`, returning `MAX` if `self == MIN`
+instead of overflowing.
+
+# Examples
+
+Basic usage:
+
+```
+", $Feature, "#![feature(saturating_neg)]
+assert_eq!(100", stringify!($SelfT), ".saturating_neg(), -100);
+assert_eq!((-100", stringify!($SelfT), ").saturating_neg(), 100);
+assert_eq!(", stringify!($SelfT), "::min_value().saturating_neg(), ", stringify!($SelfT),
+"::max_value());
+assert_eq!(", stringify!($SelfT), "::max_value().saturating_neg(), ", stringify!($SelfT),
+"::min_value() + 1);",
+$EndFeature, "
+```"),
+
+            #[unstable(feature = "saturating_neg", issue = "59983")]
+            #[inline]
+            pub fn saturating_neg(self) -> Self {
+                intrinsics::saturating_sub(0, self)
+            }
+        }
+
+        doc_comment! {
+            concat!("Saturating absolute value. Computes `self.abs()`, returning `MAX` if `self ==
+MIN` instead of overflowing.
+
+# Examples
+
+Basic usage:
+
+```
+", $Feature, "#![feature(saturating_neg)]
+assert_eq!(100", stringify!($SelfT), ".saturating_abs(), 100);
+assert_eq!((-100", stringify!($SelfT), ").saturating_abs(), 100);
+assert_eq!(", stringify!($SelfT), "::min_value().saturating_abs(), ", stringify!($SelfT),
+"::max_value());
+assert_eq!((", stringify!($SelfT), "::min_value() + 1).saturating_abs(), ", stringify!($SelfT),
+"::max_value());",
+$EndFeature, "
+```"),
+
+            #[unstable(feature = "saturating_neg", issue = "59983")]
+            #[inline]
+            pub fn saturating_abs(self) -> Self {
+                if self.is_negative() {
+                    self.saturating_neg()
+                } else {
+                    self
                 }
             }
         }
@@ -936,10 +1073,12 @@ assert_eq!(", stringify!($SelfT), "::MIN.saturating_mul(10), ", stringify!($Self
 $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn saturating_mul(self, rhs: Self) -> Self {
                 self.checked_mul(rhs).unwrap_or_else(|| {
-                    if (self < 0 && rhs < 0) || (self > 0 && rhs > 0) {
+                    if (self < 0) == (rhs < 0) {
                         Self::max_value()
                     } else {
                         Self::min_value()
@@ -957,7 +1096,6 @@ saturating at the numeric bounds instead of overflowing.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "use std::", stringify!($SelfT), ";
 
 assert_eq!((-4", stringify!($SelfT), ").saturating_pow(3), -64);
@@ -965,7 +1103,9 @@ assert_eq!(", stringify!($SelfT), "::MIN.saturating_pow(2), ", stringify!($SelfT
 assert_eq!(", stringify!($SelfT), "::MIN.saturating_pow(3), ", stringify!($SelfT), "::MIN);",
 $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn saturating_pow(self, exp: u32) -> Self {
                 match self.checked_pow(exp) {
@@ -991,11 +1131,12 @@ assert_eq!(", stringify!($SelfT), "::max_value().wrapping_add(2), ", stringify!(
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_add(self, rhs: Self) -> Self {
-                unsafe {
-                    intrinsics::overflowing_add(self, rhs)
-                }
+            pub const fn wrapping_add(self, rhs: Self) -> Self {
+                intrinsics::wrapping_add(self, rhs)
             }
         }
 
@@ -1014,11 +1155,12 @@ stringify!($SelfT), "::max_value());",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_sub(self, rhs: Self) -> Self {
-                unsafe {
-                    intrinsics::overflowing_sub(self, rhs)
-                }
+            pub const fn wrapping_sub(self, rhs: Self) -> Self {
+                intrinsics::wrapping_sub(self, rhs)
             }
         }
 
@@ -1036,11 +1178,12 @@ assert_eq!(11i8.wrapping_mul(12), -124);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_mul(self, rhs: Self) -> Self {
-                unsafe {
-                    intrinsics::overflowing_mul(self, rhs)
-                }
+            pub const fn wrapping_mul(self, rhs: Self) -> Self {
+                intrinsics::wrapping_mul(self, rhs)
             }
         }
 
@@ -1066,6 +1209,8 @@ assert_eq!((-128i8).wrapping_div(-1), -128);",
 $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn wrapping_div(self, rhs: Self) -> Self {
                 self.overflowing_div(rhs).0
@@ -1073,7 +1218,7 @@ $EndFeature, "
         }
 
         doc_comment! {
-            concat!("Wrapping Euclidean division. Computes `self.div_euc(rhs)`,
+            concat!("Wrapping Euclidean division. Computes `self.div_euclid(rhs)`,
 wrapping around at the boundary of the type.
 
 Wrapping will only occur in `MIN / -1` on a signed type (where `MIN` is the negative minimal value
@@ -1089,14 +1234,15 @@ This function will panic if `rhs` is 0.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(100", stringify!($SelfT), ".wrapping_div_euc(10), 10);
-assert_eq!((-128i8).wrapping_div_euc(-1), -128);
+assert_eq!(100", stringify!($SelfT), ".wrapping_div_euclid(10), 10);
+assert_eq!((-128i8).wrapping_div_euclid(-1), -128);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_div_euc(self, rhs: Self) -> Self {
-                self.overflowing_div_euc(rhs).0
+            pub fn wrapping_div_euclid(self, rhs: Self) -> Self {
+                self.overflowing_div_euclid(rhs).0
             }
         }
 
@@ -1122,6 +1268,8 @@ assert_eq!((-128i8).wrapping_rem(-1), 0);",
 $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn wrapping_rem(self, rhs: Self) -> Self {
                 self.overflowing_rem(rhs).0
@@ -1129,8 +1277,8 @@ $EndFeature, "
         }
 
         doc_comment! {
-            concat!("Wrapping Euclidean modulo. Computes `self.mod_euc(rhs)`, wrapping around at the
-boundary of the type.
+            concat!("Wrapping Euclidean remainder. Computes `self.rem_euclid(rhs)`, wrapping around
+at the boundary of the type.
 
 Wrapping will only occur in `MIN % -1` on a signed type (where `MIN` is the negative minimal value
 for the type). In this case, this method returns 0.
@@ -1144,14 +1292,15 @@ This function will panic if `rhs` is 0.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(100", stringify!($SelfT), ".wrapping_mod_euc(10), 0);
-assert_eq!((-128i8).wrapping_mod_euc(-1), 0);
+assert_eq!(100", stringify!($SelfT), ".wrapping_rem_euclid(10), 0);
+assert_eq!((-128i8).wrapping_rem_euclid(-1), 0);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_mod_euc(self, rhs: Self) -> Self {
-                self.overflowing_mod_euc(rhs).0
+            pub fn wrapping_rem_euclid(self, rhs: Self) -> Self {
+                self.overflowing_rem_euclid(rhs).0
             }
         }
 
@@ -1174,8 +1323,9 @@ assert_eq!(", stringify!($SelfT), "::min_value().wrapping_neg(), ", stringify!($
 $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
-            pub fn wrapping_neg(self) -> Self {
+            pub const fn wrapping_neg(self) -> Self {
                 self.overflowing_neg().0
             }
         }
@@ -1199,8 +1349,13 @@ assert_eq!((-1", stringify!($SelfT), ").wrapping_shl(128), -1);",
 $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_shl(self, rhs: u32) -> Self {
+            pub const fn wrapping_shl(self, rhs: u32) -> Self {
+                // SAFETY: the masking by the bitsize of the type ensures that we do not shift
+                // out of bounds
                 unsafe {
                     intrinsics::unchecked_shl(self, (rhs & ($BITS - 1)) as $SelfT)
                 }
@@ -1226,8 +1381,13 @@ assert_eq!((-128i16).wrapping_shr(64), -128);",
 $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_shr(self, rhs: u32) -> Self {
+            pub const fn wrapping_shr(self, rhs: u32) -> Self {
+                // SAFETY: the masking by the bitsize of the type ensures that we do not shift
+                // out of bounds
                 unsafe {
                     intrinsics::unchecked_shr(self, (rhs & ($BITS - 1)) as $SelfT)
                 }
@@ -1255,13 +1415,15 @@ assert_eq!((-128i8).wrapping_abs() as u8, 128);",
 $EndFeature, "
 ```"),
             #[stable(feature = "no_panic_abs", since = "1.13.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[allow_internal_unstable(const_if_match)]
             #[inline]
-            pub fn wrapping_abs(self) -> Self {
-                if self.is_negative() {
-                    self.wrapping_neg()
-                } else {
-                    self
-                }
+            pub const fn wrapping_abs(self) -> Self {
+                 if self.is_negative() {
+                     self.wrapping_neg()
+                 } else {
+                     self
+                 }
             }
         }
 
@@ -1274,13 +1436,14 @@ wrapping around at the boundary of the type.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "assert_eq!(3", stringify!($SelfT), ".wrapping_pow(4), 81);
 assert_eq!(3i8.wrapping_pow(5), -13);
 assert_eq!(3i8.wrapping_pow(6), -39);",
 $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn wrapping_pow(self, mut exp: u32) -> Self {
                 let mut base = self;
@@ -1322,13 +1485,13 @@ assert_eq!(5", stringify!($SelfT), ".overflowing_add(2), (7, false));
 assert_eq!(", stringify!($SelfT), "::MAX.overflowing_add(1), (", stringify!($SelfT),
 "::MIN, true));", $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
-                let (a, b) = unsafe {
-                    intrinsics::add_with_overflow(self as $ActualT,
-                                                  rhs as $ActualT)
-                };
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+                let (a, b) = intrinsics::add_with_overflow(self as $ActualT, rhs as $ActualT);
                 (a as Self, b)
             }
         }
@@ -1350,13 +1513,13 @@ assert_eq!(5", stringify!($SelfT), ".overflowing_sub(2), (3, false));
 assert_eq!(", stringify!($SelfT), "::MIN.overflowing_sub(1), (", stringify!($SelfT),
 "::MAX, true));", $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
-                let (a, b) = unsafe {
-                    intrinsics::sub_with_overflow(self as $ActualT,
-                                                  rhs as $ActualT)
-                };
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+                let (a, b) = intrinsics::sub_with_overflow(self as $ActualT, rhs as $ActualT);
                 (a as Self, b)
             }
         }
@@ -1376,13 +1539,13 @@ Basic usage:
 assert_eq!(1_000_000_000i32.overflowing_mul(10), (1410065408, true));",
 $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
-                let (a, b) = unsafe {
-                    intrinsics::mul_with_overflow(self as $ActualT,
-                                                  rhs as $ActualT)
-                };
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+                let (a, b) = intrinsics::mul_with_overflow(self as $ActualT, rhs as $ActualT);
                 (a as Self, b)
             }
         }
@@ -1411,6 +1574,8 @@ $EndFeature, "
 ```"),
             #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             pub fn overflowing_div(self, rhs: Self) -> (Self, bool) {
                 if self == Self::min_value() && rhs == -1 {
                     (self, true)
@@ -1421,7 +1586,7 @@ $EndFeature, "
         }
 
         doc_comment! {
-            concat!("Calculates the quotient of Euclidean division `self.div_euc(rhs)`.
+            concat!("Calculates the quotient of Euclidean division `self.div_euclid(rhs)`.
 
 Returns a tuple of the divisor along with a boolean indicating whether an arithmetic overflow would
 occur. If an overflow would occur then `self` is returned.
@@ -1435,20 +1600,21 @@ This function will panic if `rhs` is 0.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
 use std::", stringify!($SelfT), ";
 
-assert_eq!(5", stringify!($SelfT), ".overflowing_div_euc(2), (2, false));
-assert_eq!(", stringify!($SelfT), "::MIN.overflowing_div_euc(-1), (", stringify!($SelfT),
+assert_eq!(5", stringify!($SelfT), ".overflowing_div_euclid(2), (2, false));
+assert_eq!(", stringify!($SelfT), "::MIN.overflowing_div_euclid(-1), (", stringify!($SelfT),
 "::MIN, true));
 ```"),
             #[inline]
-            #[unstable(feature = "euclidean_division", issue = "49048")]
-            pub fn overflowing_div_euc(self, rhs: Self) -> (Self, bool) {
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            pub fn overflowing_div_euclid(self, rhs: Self) -> (Self, bool) {
                 if self == Self::min_value() && rhs == -1 {
                     (self, true)
                 } else {
-                    (self.div_euc(rhs), false)
+                    (self.div_euclid(rhs), false)
                 }
             }
         }
@@ -1476,6 +1642,8 @@ $EndFeature, "
 ```"),
             #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             pub fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
                 if self == Self::min_value() && rhs == -1 {
                     (0, true)
@@ -1487,7 +1655,7 @@ $EndFeature, "
 
 
         doc_comment! {
-            concat!("Calculates the remainder `self.mod_euc(rhs)` by Euclidean division.
+            concat!("Overflowing Euclidean remainder. Calculates `self.rem_euclid(rhs)`.
 
 Returns a tuple of the remainder after dividing along with a boolean indicating whether an
 arithmetic overflow would occur. If an overflow would occur then 0 is returned.
@@ -1501,19 +1669,20 @@ This function will panic if `rhs` is 0.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
 use std::", stringify!($SelfT), ";
 
-assert_eq!(5", stringify!($SelfT), ".overflowing_mod_euc(2), (1, false));
-assert_eq!(", stringify!($SelfT), "::MIN.overflowing_mod_euc(-1), (0, true));
+assert_eq!(5", stringify!($SelfT), ".overflowing_rem_euclid(2), (1, false));
+assert_eq!(", stringify!($SelfT), "::MIN.overflowing_rem_euclid(-1), (0, true));
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn overflowing_mod_euc(self, rhs: Self) -> (Self, bool) {
+            pub fn overflowing_rem_euclid(self, rhs: Self) -> (Self, bool) {
                 if self == Self::min_value() && rhs == -1 {
                     (0, true)
                 } else {
-                    (self.mod_euc(rhs), false)
+                    (self.rem_euclid(rhs), false)
                 }
             }
         }
@@ -1523,7 +1692,7 @@ assert_eq!(", stringify!($SelfT), "::MIN.overflowing_mod_euc(-1), (0, true));
             concat!("Negates self, overflowing if this is equal to the minimum value.
 
 Returns a tuple of the negated version of self along with a boolean indicating whether an overflow
-happened. If `self` is the minimum value (e.g. `i32::MIN` for values of type `i32`), then the
+happened. If `self` is the minimum value (e.g., `i32::MIN` for values of type `i32`), then the
 minimum value will be returned again and `true` will be returned for an overflow happening.
 
 # Examples
@@ -1539,7 +1708,9 @@ assert_eq!(", stringify!($SelfT), "::MIN.overflowing_neg(), (", stringify!($Self
 ```"),
             #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_neg(self) -> (Self, bool) {
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[allow_internal_unstable(const_if_match)]
+            pub const fn overflowing_neg(self) -> (Self, bool) {
                 if self == Self::min_value() {
                     (Self::min_value(), true)
                 } else {
@@ -1564,9 +1735,12 @@ Basic usage:
 assert_eq!(0x1i32.overflowing_shl(36), (0x10, true));",
 $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_shl(self, rhs: u32) -> (Self, bool) {
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_shl(self, rhs: u32) -> (Self, bool) {
                 (self.wrapping_shl(rhs), (rhs > ($BITS - 1)))
             }
         }
@@ -1587,9 +1761,12 @@ Basic usage:
 assert_eq!(0x10i32.overflowing_shr(36), (0x1, true));",
 $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_shr(self, rhs: u32) -> (Self, bool) {
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_shr(self, rhs: u32) -> (Self, bool) {
                 (self.wrapping_shr(rhs), (rhs > ($BITS - 1)))
             }
         }
@@ -1598,7 +1775,7 @@ $EndFeature, "
             concat!("Computes the absolute value of `self`.
 
 Returns a tuple of the absolute version of self along with a boolean indicating whether an overflow
-happened. If self is the minimum value (e.g. ", stringify!($SelfT), "::MIN for values of type
+happened. If self is the minimum value (e.g., ", stringify!($SelfT), "::MIN for values of type
  ", stringify!($SelfT), "), then the minimum value will be returned again and true will be returned
 for an overflow happening.
 
@@ -1614,13 +1791,10 @@ assert_eq!((", stringify!($SelfT), "::min_value()).overflowing_abs(), (", string
 $EndFeature, "
 ```"),
             #[stable(feature = "no_panic_abs", since = "1.13.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
-            pub fn overflowing_abs(self) -> (Self, bool) {
-                if self.is_negative() {
-                    self.overflowing_neg()
-                } else {
-                    (self, false)
-                }
+            pub const fn overflowing_abs(self) -> (Self, bool) {
+                (self.wrapping_abs(), self == Self::min_value())
             }
         }
 
@@ -1635,12 +1809,13 @@ whether an overflow happened.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "assert_eq!(3", stringify!($SelfT), ".overflowing_pow(4), (81, false));
 assert_eq!(3i8.overflowing_pow(5), (-13, true));",
 $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn overflowing_pow(self, mut exp: u32) -> (Self, bool) {
                 let mut base = self;
@@ -1688,6 +1863,8 @@ assert_eq!(x.pow(5), 32);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             #[rustc_inherit_overflow_checks]
             pub fn pow(self, mut exp: u32) -> Self {
@@ -1716,32 +1893,37 @@ $EndFeature, "
         doc_comment! {
             concat!("Calculates the quotient of Euclidean division of `self` by `rhs`.
 
-This computes the integer `n` such that `self = n * rhs + self.mod_euc(rhs)`.
+This computes the integer `n` such that `self = n * rhs + self.rem_euclid(rhs)`,
+with `0 <= self.rem_euclid(rhs) < rhs`.
+
 In other words, the result is `self / rhs` rounded to the integer `n`
 such that `self >= n * rhs`.
+If `self > 0`, this is equal to round towards zero (the default in Rust);
+if `self < 0`, this is equal to round towards +/- infinity.
 
 # Panics
 
-This function will panic if `rhs` is 0.
+This function will panic if `rhs` is 0 or the division results in overflow.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
 let a: ", stringify!($SelfT), " = 7; // or any other integer type
 let b = 4;
 
-assert_eq!(a.div_euc(b), 1); // 7 >= 4 * 1
-assert_eq!(a.div_euc(-b), -1); // 7 >= -4 * -1
-assert_eq!((-a).div_euc(b), -2); // -7 >= 4 * -2
-assert_eq!((-a).div_euc(-b), 2); // -7 >= -4 * 2
+assert_eq!(a.div_euclid(b), 1); // 7 >= 4 * 1
+assert_eq!(a.div_euclid(-b), -1); // 7 >= -4 * -1
+assert_eq!((-a).div_euclid(b), -2); // -7 >= 4 * -2
+assert_eq!((-a).div_euclid(-b), 2); // -7 >= -4 * 2
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             #[rustc_inherit_overflow_checks]
-            pub fn div_euc(self, rhs: Self) -> Self {
+            pub fn div_euclid(self, rhs: Self) -> Self {
                 let q = self / rhs;
                 if self % rhs < 0 {
                     return if rhs > 0 { q - 1 } else { q + 1 }
@@ -1752,32 +1934,35 @@ assert_eq!((-a).div_euc(-b), 2); // -7 >= -4 * 2
 
 
         doc_comment! {
-            concat!("Calculates the remainder `self mod rhs` by Euclidean division.
+            concat!("Calculates the least nonnegative remainder of `self (mod rhs)`.
 
-In particular, the result `n` satisfies `0 <= n < rhs.abs()`.
+This is done as if by the Euclidean division algorithm -- given
+`r = self.rem_euclid(rhs)`, `self = rhs * self.div_euclid(rhs) + r`, and
+`0 <= r < abs(rhs)`.
 
 # Panics
 
-This function will panic if `rhs` is 0.
+This function will panic if `rhs` is 0 or the division results in overflow.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
 let a: ", stringify!($SelfT), " = 7; // or any other integer type
 let b = 4;
 
-assert_eq!(a.mod_euc(b), 3);
-assert_eq!((-a).mod_euc(b), 1);
-assert_eq!(a.mod_euc(-b), 3);
-assert_eq!((-a).mod_euc(-b), 1);
+assert_eq!(a.rem_euclid(b), 3);
+assert_eq!((-a).rem_euclid(b), 1);
+assert_eq!(a.rem_euclid(-b), 3);
+assert_eq!((-a).rem_euclid(-b), 1);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             #[rustc_inherit_overflow_checks]
-            pub fn mod_euc(self, rhs: Self) -> Self {
+            pub fn rem_euclid(self, rhs: Self) -> Self {
                 let r = self % rhs;
                 if r < 0 {
                     if rhs < 0 {
@@ -1811,17 +1996,28 @@ assert_eq!((-10", stringify!($SelfT), ").abs(), 10);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
             #[rustc_inherit_overflow_checks]
-            pub fn abs(self) -> Self {
-                if self.is_negative() {
-                    // Note that the #[inline] above means that the overflow
-                    // semantics of this negation depend on the crate we're being
-                    // inlined into.
-                    -self
-                } else {
-                    self
-                }
+            pub const fn abs(self) -> Self {
+                // Note that the #[inline] above means that the overflow
+                // semantics of the subtraction depend on the crate we're being
+                // inlined into.
+
+                // sign is -1 (all ones) for negative numbers, 0 otherwise.
+                let sign = self >> ($BITS - 1);
+                // For positive self, sign == 0 so the expression is simply
+                // (self ^ 0) - 0 == self == abs(self).
+                //
+                // For negative self, self ^ sign == self ^ all_ones.
+                // But all_ones ^ self == all_ones - self == -1 - self.
+                // So for negative numbers, (self ^ sign) - sign is
+                // (-1 - self) - -1 == -self == abs(self).
+                //
+                // The subtraction overflows when self is min_value(), because
+                // (-1 - min_value()) - -1 is max_value() - -1 which overflows.
+                // This is exactly when we want self.abs() to overflow.
+                (self ^ sign) - sign
             }
         }
 
@@ -1843,8 +2039,9 @@ assert_eq!((-10", stringify!($SelfT), ").signum(), -1);",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_unstable(feature = "const_int_sign", issue = "53718")]
             #[inline]
-            pub fn signum(self) -> Self {
+            pub const fn signum(self) -> Self {
                 match self {
                     n if n > 0 =>  1,
                     0          =>  0,
@@ -1867,8 +2064,9 @@ assert!(!(-10", stringify!($SelfT), ").is_positive());",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
-            pub fn is_positive(self) -> bool { self > 0 }
+            pub const fn is_positive(self) -> bool { self > 0 }
         }
 
         doc_comment! {
@@ -1885,193 +2083,270 @@ assert!(!10", stringify!($SelfT), ".is_negative());",
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_int_methods", since = "1.32.0")]
             #[inline]
-            pub fn is_negative(self) -> bool { self < 0 }
+            pub const fn is_negative(self) -> bool { self < 0 }
         }
 
-        /// Return the memory representation of this integer as a byte array in
-        /// big-endian (network) byte order.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let bytes = 0x12345678i32.to_be_bytes();
-        /// assert_eq!(bytes, [0x12, 0x34, 0x56, 0x78]);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn to_be_bytes(self) -> [u8; mem::size_of::<Self>()] {
-            self.to_be().to_ne_bytes()
+        doc_comment! {
+            concat!("Return the memory representation of this integer as a byte array in
+big-endian (network) byte order.
+",
+$to_xe_bytes_doc,
+"
+# Examples
+
+```
+let bytes = ", $swap_op, stringify!($SelfT), ".to_be_bytes();
+assert_eq!(bytes, ", $be_bytes, ");
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn to_be_bytes(self) -> [u8; mem::size_of::<Self>()] {
+                self.to_be().to_ne_bytes()
+            }
         }
 
-        /// Return the memory representation of this integer as a byte array in
-        /// little-endian byte order.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let bytes = 0x12345678i32.to_le_bytes();
-        /// assert_eq!(bytes, [0x78, 0x56, 0x34, 0x12]);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn to_le_bytes(self) -> [u8; mem::size_of::<Self>()] {
-            self.to_le().to_ne_bytes()
+doc_comment! {
+            concat!("Return the memory representation of this integer as a byte array in
+little-endian byte order.
+",
+$to_xe_bytes_doc,
+"
+# Examples
+
+```
+let bytes = ", $swap_op, stringify!($SelfT), ".to_le_bytes();
+assert_eq!(bytes, ", $le_bytes, ");
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn to_le_bytes(self) -> [u8; mem::size_of::<Self>()] {
+                self.to_le().to_ne_bytes()
+            }
         }
 
-        /// Return the memory representation of this integer as a byte array in
-        /// native byte order.
-        ///
-        /// As the target platform's native endianness is used, portable code
-        /// should use [`to_be_bytes`] or [`to_le_bytes`], as appropriate,
-        /// instead.
-        ///
-        /// [`to_be_bytes`]: #method.to_be_bytes
-        /// [`to_le_bytes`]: #method.to_le_bytes
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let bytes = i32::min_value().to_be().to_ne_bytes();
-        /// assert_eq!(bytes, [0x80, 0, 0, 0]);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn to_ne_bytes(self) -> [u8; mem::size_of::<Self>()] {
-            unsafe { mem::transmute(self) }
+        doc_comment! {
+            concat!("
+Return the memory representation of this integer as a byte array in
+native byte order.
+
+As the target platform's native endianness is used, portable code
+should use [`to_be_bytes`] or [`to_le_bytes`], as appropriate,
+instead.
+",
+$to_xe_bytes_doc,
+"
+[`to_be_bytes`]: #method.to_be_bytes
+[`to_le_bytes`]: #method.to_le_bytes
+
+# Examples
+
+```
+let bytes = ", $swap_op, stringify!($SelfT), ".to_ne_bytes();
+assert_eq!(
+    bytes,
+    if cfg!(target_endian = \"big\") {
+        ", $be_bytes, "
+    } else {
+        ", $le_bytes, "
+    }
+);
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn to_ne_bytes(self) -> [u8; mem::size_of::<Self>()] {
+                // SAFETY: integers are plain old datatypes so we can always transmute them to
+                // arrays of bytes
+                unsafe { mem::transmute(self) }
+            }
         }
 
-        /// Create an integer value from its representation as a byte array in
-        /// big endian.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let int = i32::from_be_bytes([0x12, 0x34, 0x56, 0x78]);
-        /// assert_eq!(int, 0x12_34_56_78);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn from_be_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
-            Self::from_be(Self::from_ne_bytes(bytes))
+doc_comment! {
+            concat!("Create an integer value from its representation as a byte array in
+big endian.
+",
+$from_xe_bytes_doc,
+"
+# Examples
+
+```
+let value = ", stringify!($SelfT), "::from_be_bytes(", $be_bytes, ");
+assert_eq!(value, ", $swap_op, ");
+```
+
+When starting from a slice rather than an array, fallible conversion APIs can be used:
+
+```
+use std::convert::TryInto;
+
+fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<", stringify!($SelfT), ">());
+    *input = rest;
+    ", stringify!($SelfT), "::from_be_bytes(int_bytes.try_into().unwrap())
+}
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn from_be_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
+                Self::from_be(Self::from_ne_bytes(bytes))
+            }
         }
 
-        /// Create an integer value from its representation as a byte array in
-        /// little endian.
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let int = i32::from_le_bytes([0x12, 0x34, 0x56, 0x78]);
-        /// assert_eq!(int, 0x78_56_34_12);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn from_le_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
-            Self::from_le(Self::from_ne_bytes(bytes))
+doc_comment! {
+            concat!("
+Create an integer value from its representation as a byte array in
+little endian.
+",
+$from_xe_bytes_doc,
+"
+# Examples
+
+```
+let value = ", stringify!($SelfT), "::from_le_bytes(", $le_bytes, ");
+assert_eq!(value, ", $swap_op, ");
+```
+
+When starting from a slice rather than an array, fallible conversion APIs can be used:
+
+```
+use std::convert::TryInto;
+
+fn read_le_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<", stringify!($SelfT), ">());
+    *input = rest;
+    ", stringify!($SelfT), "::from_le_bytes(int_bytes.try_into().unwrap())
+}
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn from_le_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
+                Self::from_le(Self::from_ne_bytes(bytes))
+            }
         }
 
-        /// Create an integer value from its memory representation as a byte
-        /// array in native endianness.
-        ///
-        /// As the target platform's native endianness is used, portable code
-        /// likely wants to use [`from_be_bytes`] or [`from_le_bytes`], as
-        /// appropriate instead.
-        ///
-        /// [`from_be_bytes`]: #method.from_be_bytes
-        /// [`from_le_bytes`]: #method.from_le_bytes
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let int = i32::from_be(i32::from_ne_bytes([0x80, 0, 0, 0]));
-        /// assert_eq!(int, i32::min_value());
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn from_ne_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
-            unsafe { mem::transmute(bytes) }
+        doc_comment! {
+            concat!("Create an integer value from its memory representation as a byte
+array in native endianness.
+
+As the target platform's native endianness is used, portable code
+likely wants to use [`from_be_bytes`] or [`from_le_bytes`], as
+appropriate instead.
+
+[`from_be_bytes`]: #method.from_be_bytes
+[`from_le_bytes`]: #method.from_le_bytes
+",
+$from_xe_bytes_doc,
+"
+# Examples
+
+```
+let value = ", stringify!($SelfT), "::from_ne_bytes(if cfg!(target_endian = \"big\") {
+    ", $be_bytes, "
+} else {
+    ", $le_bytes, "
+});
+assert_eq!(value, ", $swap_op, ");
+```
+
+When starting from a slice rather than an array, fallible conversion APIs can be used:
+
+```
+use std::convert::TryInto;
+
+fn read_ne_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<", stringify!($SelfT), ">());
+    *input = rest;
+    ", stringify!($SelfT), "::from_ne_bytes(int_bytes.try_into().unwrap())
+}
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn from_ne_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
+                // SAFETY: integers are plain old datatypes so we can always transmute to them
+                unsafe { mem::transmute(bytes) }
+            }
         }
     }
 }
 
 #[lang = "i8"]
 impl i8 {
-    int_impl! { i8, i8, u8, 8, -128, 127, "", "", 2, "-0x7e", "0xa" }
+    int_impl! { i8, i8, u8, 8, -128, 127, "", "", 2, "-0x7e", "0xa", "0x12", "0x12", "0x48",
+    "[0x12]", "[0x12]", "", "" }
 }
 
 #[lang = "i16"]
 impl i16 {
-    int_impl! { i16, i16, u16, 16, -32768, 32767, "", "", 4, "-0x5ffd", "0x3a" }
+    int_impl! { i16, i16, u16, 16, -32768, 32767, "", "", 4, "-0x5ffd", "0x3a", "0x1234", "0x3412",
+    "0x2c48", "[0x34, 0x12]", "[0x12, 0x34]", "", "" }
 }
 
 #[lang = "i32"]
 impl i32 {
-    int_impl! { i32, i32, u32, 32, -2147483648, 2147483647, "", "", 8, "0x10000b3", "0xb301" }
+    int_impl! { i32, i32, u32, 32, -2147483648, 2147483647, "", "", 8, "0x10000b3", "0xb301",
+    "0x12345678", "0x78563412", "0x1e6a2c48", "[0x78, 0x56, 0x34, 0x12]",
+    "[0x12, 0x34, 0x56, 0x78]", "", "" }
 }
 
 #[lang = "i64"]
 impl i64 {
     int_impl! { i64, i64, u64, 64, -9223372036854775808, 9223372036854775807, "", "", 12,
-                "0xaa00000000006e1", "0x6e10aa" }
+    "0xaa00000000006e1", "0x6e10aa", "0x1234567890123456", "0x5634129078563412",
+    "0x6a2c48091e6a2c48", "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
+    "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]", "", "" }
 }
 
 #[lang = "i128"]
 impl i128 {
     int_impl! { i128, i128, u128, 128, -170141183460469231731687303715884105728,
-        170141183460469231731687303715884105727, "", "", 16,
-        "0x13f40000000000000000000000004f76", "0x4f7613f4"
-    }
+    170141183460469231731687303715884105727, "", "", 16,
+    "0x13f40000000000000000000000004f76", "0x4f7613f4", "0x12345678901234567890123456789012",
+    "0x12907856341290785634129078563412", "0x48091e6a2c48091e6a2c48091e6a2c48",
+    "[0x12, 0x90, 0x78, 0x56, 0x34, 0x12, 0x90, 0x78, \
+      0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
+    "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, \
+      0x78, 0x90, 0x12, 0x34, 0x56, 0x78, 0x90, 0x12]", "", "" }
 }
 
 #[cfg(target_pointer_width = "16")]
 #[lang = "isize"]
 impl isize {
-    int_impl! { isize, i16, u16, 16, -32768, 32767, "", "", 4, "-0x5ffd", "0x3a" }
+    int_impl! { isize, i16, u16, 16, -32768, 32767, "", "", 4, "-0x5ffd", "0x3a", "0x1234",
+    "0x3412", "0x2c48", "[0x34, 0x12]", "[0x12, 0x34]",
+    usize_isize_to_xe_bytes_doc!(), usize_isize_from_xe_bytes_doc!() }
 }
 
 #[cfg(target_pointer_width = "32")]
 #[lang = "isize"]
 impl isize {
-    int_impl! { isize, i32, u32, 32, -2147483648, 2147483647, "", "", 8, "0x10000b3", "0xb301" }
+    int_impl! { isize, i32, u32, 32, -2147483648, 2147483647, "", "", 8, "0x10000b3", "0xb301",
+    "0x12345678", "0x78563412", "0x1e6a2c48", "[0x78, 0x56, 0x34, 0x12]",
+    "[0x12, 0x34, 0x56, 0x78]",
+    usize_isize_to_xe_bytes_doc!(), usize_isize_from_xe_bytes_doc!() }
 }
 
 #[cfg(target_pointer_width = "64")]
 #[lang = "isize"]
 impl isize {
     int_impl! { isize, i64, u64, 64, -9223372036854775808, 9223372036854775807, "", "",
-        12, "0xaa00000000006e1", "0x6e10aa" }
+    12, "0xaa00000000006e1", "0x6e10aa",  "0x1234567890123456", "0x5634129078563412",
+     "0x6a2c48091e6a2c48", "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
+     "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
+     usize_isize_to_xe_bytes_doc!(), usize_isize_from_xe_bytes_doc!() }
 }
 
-// Emits the correct `cttz` call, depending on the size of the type.
-macro_rules! uint_cttz_call {
-    // As of LLVM 3.6 the codegen for the zero-safe cttz8 intrinsic
-    // emits two conditional moves on x86_64. By promoting the value to
-    // u16 and setting bit 8, we get better code without any conditional
-    // operations.
-    // FIXME: There's a LLVM patch (http://reviews.llvm.org/D9284)
-    // pending, remove this workaround once LLVM generates better code
-    // for cttz8.
-    ($value:expr, 8) => { intrinsics::cttz($value as u16 | 0x100) };
-    ($value:expr, $_BITS:expr) => { intrinsics::cttz($value) }
-}
-
-// `Int` + `UnsignedInt` implemented for unsigned integers
 macro_rules! uint_impl {
     ($SelfT:ty, $ActualT:ty, $BITS:expr, $MaxV:expr, $Feature:expr, $EndFeature:expr,
-        $rot:expr, $rot_op:expr, $rot_result:expr) => {
+        $rot:expr, $rot_op:expr, $rot_result:expr, $swap_op:expr, $swapped:expr,
+        $reversed:expr, $le_bytes:expr, $be_bytes:expr,
+        $to_xe_bytes_doc:expr, $from_xe_bytes_doc:expr) => {
         doc_comment! {
             concat!("Returns the smallest value that can be represented by this integer type.
 
@@ -2083,7 +2358,9 @@ Basic usage:
 ", $Feature, "assert_eq!(", stringify!($SelfT), "::min_value(), 0);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
+            #[rustc_promotable]
+            #[inline(always)]
+            #[rustc_const_stable(feature = "const_min_value", since = "1.32.0")]
             pub const fn min_value() -> Self { 0 }
         }
 
@@ -2099,7 +2376,9 @@ Basic usage:
 stringify!($MaxV), ");", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[inline]
+            #[rustc_promotable]
+            #[inline(always)]
+            #[rustc_const_stable(feature = "const_max_value", since = "1.32.0")]
             pub const fn max_value() -> Self { !0 }
         }
 
@@ -2146,10 +2425,10 @@ Basic usage:
 assert_eq!(n.count_ones(), 3);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn count_ones(self) -> u32 {
-                unsafe { intrinsics::ctpop(self as $ActualT) as u32 }
+                intrinsics::ctpop(self as $ActualT) as u32
             }
         }
 
@@ -2164,7 +2443,7 @@ Basic usage:
 ", $Feature, "assert_eq!(", stringify!($SelfT), "::max_value().count_zeros(), 0);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn count_zeros(self) -> u32 {
                 (!self).count_ones()
@@ -2184,10 +2463,10 @@ Basic usage:
 assert_eq!(n.leading_zeros(), 2);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn leading_zeros(self) -> u32 {
-                unsafe { intrinsics::ctlz(self as $ActualT) as u32 }
+                intrinsics::ctlz(self as $ActualT) as u32
             }
         }
 
@@ -2205,10 +2484,10 @@ Basic usage:
 assert_eq!(n.trailing_zeros(), 3);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn trailing_zeros(self) -> u32 {
-                unsafe { uint_cttz_call!(self, $BITS) as u32 }
+                intrinsics::cttz(self) as u32
             }
         }
 
@@ -2216,7 +2495,7 @@ assert_eq!(n.trailing_zeros(), 3);", $EndFeature, "
             concat!("Shifts the bits to the left by a specified amount, `n`,
 wrapping the truncated bits to the end of the resulting integer.
 
-Please note this isn't the same operation as `<<`!
+Please note this isn't the same operation as the `<<` shifting operator!
 
 # Examples
 
@@ -2229,11 +2508,12 @@ let m = ", $rot_result, ";
 assert_eq!(n.rotate_left(", $rot, "), m);
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn rotate_left(self, n: u32) -> Self {
-                // Protect against undefined behaviour for over-long bit shifts
-                let n = n % $BITS;
-                (self << n) | (self >> (($BITS - n) % $BITS))
+            pub const fn rotate_left(self, n: u32) -> Self {
+                intrinsics::rotate_left(self, n as $SelfT)
             }
         }
 
@@ -2242,7 +2522,7 @@ assert_eq!(n.rotate_left(", $rot, "), m);
 wrapping the truncated bits to the beginning of the resulting
 integer.
 
-Please note this isn't the same operation as `>>`!
+Please note this isn't the same operation as the `>>` shifting operator!
 
 # Examples
 
@@ -2255,63 +2535,57 @@ let m = ", $rot_op, ";
 assert_eq!(n.rotate_right(", $rot, "), m);
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn rotate_right(self, n: u32) -> Self {
-                // Protect against undefined behaviour for over-long bit shifts
-                let n = n % $BITS;
-                (self >> n) | (self << (($BITS - n) % $BITS))
+            pub const fn rotate_right(self, n: u32) -> Self {
+                intrinsics::rotate_right(self, n as $SelfT)
             }
         }
 
-        /// Reverses the byte order of the integer.
-        ///
-        /// # Examples
-        ///
-        /// Basic usage:
-        ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u16` is used here.
-        ///
-        /// ```
-        /// let n: u16 = 0b0000000_01010101;
-        /// assert_eq!(n, 85);
-        ///
-        /// let m = n.swap_bytes();
-        ///
-        /// assert_eq!(m, 0b01010101_00000000);
-        /// assert_eq!(m, 21760);
-        /// ```
-        #[stable(feature = "rust1", since = "1.0.0")]
-        #[rustc_const_unstable(feature = "const_int_ops")]
-        #[inline]
-        pub const fn swap_bytes(self) -> Self {
-            unsafe { intrinsics::bswap(self as $ActualT) as Self }
+        doc_comment! {
+            concat!("
+Reverses the byte order of the integer.
+
+# Examples
+
+Basic usage:
+
+```
+let n = ", $swap_op, stringify!($SelfT), ";
+let m = n.swap_bytes();
+
+assert_eq!(m, ", $swapped, ");
+```"),
+            #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
+            #[inline]
+            pub const fn swap_bytes(self) -> Self {
+                intrinsics::bswap(self as $ActualT) as Self
+            }
         }
 
-        /// Reverses the bit pattern of the integer.
-        ///
-        /// # Examples
-        ///
-        /// Basic usage:
-        ///
-        /// Please note that this example is shared between integer types.
-        /// Which explains why `u16` is used here.
-        ///
-        /// ```
-        /// #![feature(reverse_bits)]
-        ///
-        /// let n: u16 = 0b0000000_01010101;
-        /// assert_eq!(n, 85);
-        ///
-        /// let m = n.reverse_bits();
-        ///
-        /// assert_eq!(m, 0b10101010_00000000);
-        /// assert_eq!(m, 43520);
-        /// ```
-        #[unstable(feature = "reverse_bits", issue = "48763")]
-        #[inline]
-        pub fn reverse_bits(self) -> Self {
-            unsafe { intrinsics::bitreverse(self as $ActualT) as Self }
+        doc_comment! {
+            concat!("Reverses the bit pattern of the integer.
+
+# Examples
+
+Basic usage:
+
+```
+let n = ", $swap_op, stringify!($SelfT), ";
+let m = n.reverse_bits();
+
+assert_eq!(m, ", $reversed, ");
+```"),
+            #[stable(feature = "reverse_bits", since = "1.37.0")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
+            #[inline]
+            #[must_use]
+            pub const fn reverse_bits(self) -> Self {
+                intrinsics::bitreverse(self as $ActualT) as Self
+            }
         }
 
         doc_comment! {
@@ -2334,7 +2608,7 @@ if cfg!(target_endian = \"big\") {
 }", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn from_be(x: Self) -> Self {
                 #[cfg(target_endian = "big")]
@@ -2368,7 +2642,7 @@ if cfg!(target_endian = \"little\") {
 }", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn from_le(x: Self) -> Self {
                 #[cfg(target_endian = "little")]
@@ -2402,7 +2676,7 @@ if cfg!(target_endian = \"big\") {
 }", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn to_be(self) -> Self { // or not to be?
                 #[cfg(target_endian = "big")]
@@ -2436,7 +2710,7 @@ if cfg!(target_endian = \"little\") {
 }", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
-            #[rustc_const_unstable(feature = "const_int_ops")]
+            #[rustc_const_stable(feature = "const_math", since = "1.32.0")]
             #[inline]
             pub const fn to_le(self) -> Self {
                 #[cfg(target_endian = "little")]
@@ -2464,6 +2738,8 @@ Basic usage:
 assert_eq!((", stringify!($SelfT), "::max_value() - 2).checked_add(3), None);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_add(self, rhs: Self) -> Option<Self> {
                 let (a, b) = self.overflowing_add(rhs);
@@ -2484,6 +2760,8 @@ Basic usage:
 assert_eq!(0", stringify!($SelfT), ".checked_sub(1), None);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_sub(self, rhs: Self) -> Option<Self> {
                 let (a, b) = self.overflowing_sub(rhs);
@@ -2504,6 +2782,8 @@ Basic usage:
 assert_eq!(", stringify!($SelfT), "::max_value().checked_mul(2), None);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_mul(self, rhs: Self) -> Option<Self> {
                 let (a, b) = self.overflowing_mul(rhs);
@@ -2524,17 +2804,21 @@ Basic usage:
 assert_eq!(1", stringify!($SelfT), ".checked_div(0), None);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_div(self, rhs: Self) -> Option<Self> {
                 match rhs {
                     0 => None,
+                    // SAFETY: div by zero has been checked above and unsigned types have no other
+                    // failure modes for division
                     rhs => Some(unsafe { intrinsics::unchecked_div(self, rhs) }),
                 }
             }
         }
 
         doc_comment! {
-            concat!("Checked Euclidean division. Computes `self.div_euc(rhs)`, returning `None`
+            concat!("Checked Euclidean division. Computes `self.div_euclid(rhs)`, returning `None`
 if `rhs == 0`.
 
 # Examples
@@ -2542,17 +2826,18 @@ if `rhs == 0`.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(128", stringify!($SelfT), ".checked_div(2), Some(64));
-assert_eq!(1", stringify!($SelfT), ".checked_div_euc(0), None);
+assert_eq!(128", stringify!($SelfT), ".checked_div_euclid(2), Some(64));
+assert_eq!(1", stringify!($SelfT), ".checked_div_euclid(0), None);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn checked_div_euc(self, rhs: Self) -> Option<Self> {
+            pub fn checked_div_euclid(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 {
                     None
                 } else {
-                    Some(self.div_euc(rhs))
+                    Some(self.div_euclid(rhs))
                 }
             }
         }
@@ -2571,18 +2856,22 @@ Basic usage:
 assert_eq!(5", stringify!($SelfT), ".checked_rem(0), None);", $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_rem(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 {
                     None
                 } else {
+                    // SAFETY: div by zero has been checked above and unsigned types have no other
+                    // failure modes for division
                     Some(unsafe { intrinsics::unchecked_rem(self, rhs) })
                 }
             }
         }
 
         doc_comment! {
-            concat!("Checked Euclidean modulo. Computes `self.mod_euc(rhs)`, returning `None`
+            concat!("Checked Euclidean modulo. Computes `self.rem_euclid(rhs)`, returning `None`
 if `rhs == 0`.
 
 # Examples
@@ -2590,17 +2879,18 @@ if `rhs == 0`.
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(5", stringify!($SelfT), ".checked_mod_euc(2), Some(1));
-assert_eq!(5", stringify!($SelfT), ".checked_mod_euc(0), None);
+assert_eq!(5", stringify!($SelfT), ".checked_rem_euclid(2), Some(1));
+assert_eq!(5", stringify!($SelfT), ".checked_rem_euclid(0), None);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn checked_mod_euc(self, rhs: Self) -> Option<Self> {
+            pub fn checked_rem_euclid(self, rhs: Self) -> Option<Self> {
                 if rhs == 0 {
                     None
                 } else {
-                    Some(self.mod_euc(rhs))
+                    Some(self.rem_euclid(rhs))
                 }
             }
         }
@@ -2640,6 +2930,8 @@ Basic usage:
 assert_eq!(0x10", stringify!($SelfT), ".checked_shl(129), None);", $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_shl(self, rhs: u32) -> Option<Self> {
                 let (a, b) = self.overflowing_shl(rhs);
@@ -2660,6 +2952,8 @@ Basic usage:
 assert_eq!(0x10", stringify!($SelfT), ".checked_shr(129), None);", $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_shr(self, rhs: u32) -> Option<Self> {
                 let (a, b) = self.overflowing_shr(rhs);
@@ -2676,11 +2970,12 @@ overflow occurred.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "assert_eq!(2", stringify!($SelfT), ".checked_pow(5), Some(32));
 assert_eq!(", stringify!($SelfT), "::max_value().checked_pow(2), None);", $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn checked_pow(self, mut exp: u32) -> Option<Self> {
                 let mut base = self;
@@ -2717,13 +3012,14 @@ Basic usage:
 ", $Feature, "assert_eq!(100", stringify!($SelfT), ".saturating_add(1), 101);
 assert_eq!(200u8.saturating_add(127), 255);", $EndFeature, "
 ```"),
+
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[rustc_const_unstable(feature = "const_saturating_int_methods", issue = "53718")]
             #[inline]
-            pub fn saturating_add(self, rhs: Self) -> Self {
-                match self.checked_add(rhs) {
-                    Some(x) => x,
-                    None => Self::max_value(),
-                }
+            pub const fn saturating_add(self, rhs: Self) -> Self {
+                intrinsics::saturating_add(self, rhs)
             }
         }
 
@@ -2740,12 +3036,12 @@ Basic usage:
 assert_eq!(13", stringify!($SelfT), ".saturating_sub(127), 0);", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[rustc_const_unstable(feature = "const_saturating_int_methods", issue = "53718")]
             #[inline]
-            pub fn saturating_sub(self, rhs: Self) -> Self {
-                match self.checked_sub(rhs) {
-                    Some(x) => x,
-                    None => Self::min_value(),
-                }
+            pub const fn saturating_sub(self, rhs: Self) -> Self {
+                intrinsics::saturating_sub(self, rhs)
             }
         }
 
@@ -2765,6 +3061,8 @@ assert_eq!((", stringify!($SelfT), "::MAX).saturating_mul(10), ", stringify!($Se
 "::MAX);", $EndFeature, "
 ```"),
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn saturating_mul(self, rhs: Self) -> Self {
                 self.checked_mul(rhs).unwrap_or(Self::max_value())
@@ -2780,14 +3078,15 @@ saturating at the numeric bounds instead of overflowing.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "use std::", stringify!($SelfT), ";
 
 assert_eq!(4", stringify!($SelfT), ".saturating_pow(3), 64);
 assert_eq!(", stringify!($SelfT), "::MAX.saturating_pow(2), ", stringify!($SelfT), "::MAX);",
 $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn saturating_pow(self, exp: u32) -> Self {
                 match self.checked_pow(exp) {
@@ -2811,11 +3110,12 @@ assert_eq!(200", stringify!($SelfT), ".wrapping_add(", stringify!($SelfT), "::ma
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_add(self, rhs: Self) -> Self {
-                unsafe {
-                    intrinsics::overflowing_add(self, rhs)
-                }
+            pub const fn wrapping_add(self, rhs: Self) -> Self {
+                intrinsics::wrapping_add(self, rhs)
             }
         }
 
@@ -2833,11 +3133,12 @@ assert_eq!(100", stringify!($SelfT), ".wrapping_sub(", stringify!($SelfT), "::ma
 $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_sub(self, rhs: Self) -> Self {
-                unsafe {
-                    intrinsics::overflowing_sub(self, rhs)
-                }
+            pub const fn wrapping_sub(self, rhs: Self) -> Self {
+                intrinsics::wrapping_sub(self, rhs)
             }
         }
 
@@ -2856,11 +3157,12 @@ $EndFeature, "
         /// assert_eq!(25u8.wrapping_mul(12), 44);
         /// ```
         #[stable(feature = "rust1", since = "1.0.0")]
+        #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+        #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
         #[inline]
-        pub fn wrapping_mul(self, rhs: Self) -> Self {
-            unsafe {
-                intrinsics::overflowing_mul(self, rhs)
-            }
+        pub const fn wrapping_mul(self, rhs: Self) -> Self {
+            intrinsics::wrapping_mul(self, rhs)
         }
 
         doc_comment! {
@@ -2878,6 +3180,8 @@ Basic usage:
 ", $Feature, "assert_eq!(100", stringify!($SelfT), ".wrapping_div(10), 10);", $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn wrapping_div(self, rhs: Self) -> Self {
                 self / rhs
@@ -2885,23 +3189,27 @@ Basic usage:
         }
 
         doc_comment! {
-            concat!("Wrapping Euclidean division. Computes `self.div_euc(rhs)`.
+            concat!("Wrapping Euclidean division. Computes `self.div_euclid(rhs)`.
 Wrapped division on unsigned types is just normal division.
 There's no way wrapping could ever happen.
 This function exists, so that all operations
 are accounted for in the wrapping operations.
+Since, for the positive integers, all common
+definitions of division are equal, this
+is exactly equal to `self.wrapping_div(rhs)`.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(100", stringify!($SelfT), ".wrapping_div_euc(10), 10);
+assert_eq!(100", stringify!($SelfT), ".wrapping_div_euclid(10), 10);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_div_euc(self, rhs: Self) -> Self {
+            pub fn wrapping_div_euclid(self, rhs: Self) -> Self {
                 self / rhs
             }
         }
@@ -2922,6 +3230,8 @@ Basic usage:
 ", $Feature, "assert_eq!(100", stringify!($SelfT), ".wrapping_rem(10), 0);", $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn wrapping_rem(self, rhs: Self) -> Self {
                 self % rhs
@@ -2929,24 +3239,28 @@ Basic usage:
         }
 
         doc_comment! {
-            concat!("Wrapping Euclidean modulo. Computes `self.mod_euc(rhs)`.
+            concat!("Wrapping Euclidean modulo. Computes `self.rem_euclid(rhs)`.
 Wrapped modulo calculation on unsigned types is
 just the regular remainder calculation.
 There's no way wrapping could ever happen.
 This function exists, so that all operations
 are accounted for in the wrapping operations.
+Since, for the positive integers, all common
+definitions of division are equal, this
+is exactly equal to `self.wrapping_rem(rhs)`.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(100", stringify!($SelfT), ".wrapping_mod_euc(10), 0);
+assert_eq!(100", stringify!($SelfT), ".wrapping_rem_euclid(10), 0);
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_mod_euc(self, rhs: Self) -> Self {
+            pub fn wrapping_rem_euclid(self, rhs: Self) -> Self {
                 self % rhs
             }
         }
@@ -2973,8 +3287,9 @@ assert_eq!(100", stringify!($SelfT), ".wrapping_mod_euc(10), 0);
         /// assert_eq!((-128i8).wrapping_neg(), -128);
         /// ```
         #[stable(feature = "num_wrapping", since = "1.2.0")]
+        #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
         #[inline]
-        pub fn wrapping_neg(self) -> Self {
+        pub const fn wrapping_neg(self) -> Self {
             self.overflowing_neg().0
         }
 
@@ -2999,8 +3314,13 @@ Basic usage:
 assert_eq!(1", stringify!($SelfT), ".wrapping_shl(128), 1);", $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_shl(self, rhs: u32) -> Self {
+            pub const fn wrapping_shl(self, rhs: u32) -> Self {
+                // SAFETY: the masking by the bitsize of the type ensures that we do not shift
+                // out of bounds
                 unsafe {
                     intrinsics::unchecked_shl(self, (rhs & ($BITS - 1)) as $SelfT)
                 }
@@ -3028,8 +3348,13 @@ Basic usage:
 assert_eq!(128", stringify!($SelfT), ".wrapping_shr(128), 128);", $EndFeature, "
 ```"),
             #[stable(feature = "num_wrapping", since = "1.2.0")]
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
-            pub fn wrapping_shr(self, rhs: u32) -> Self {
+            pub const fn wrapping_shr(self, rhs: u32) -> Self {
+                // SAFETY: the masking by the bitsize of the type ensures that we do not shift
+                // out of bounds
                 unsafe {
                     intrinsics::unchecked_shr(self, (rhs & ($BITS - 1)) as $SelfT)
                 }
@@ -3045,11 +3370,12 @@ wrapping around at the boundary of the type.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "assert_eq!(3", stringify!($SelfT), ".wrapping_pow(5), 243);
 assert_eq!(3u8.wrapping_pow(6), 217);", $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn wrapping_pow(self, mut exp: u32) -> Self {
                 let mut base = self;
@@ -3091,13 +3417,13 @@ Basic usage
 assert_eq!(5", stringify!($SelfT), ".overflowing_add(2), (7, false));
 assert_eq!(", stringify!($SelfT), "::MAX.overflowing_add(1), (0, true));", $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_add(self, rhs: Self) -> (Self, bool) {
-                let (a, b) = unsafe {
-                    intrinsics::add_with_overflow(self as $ActualT,
-                                                  rhs as $ActualT)
-                };
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_add(self, rhs: Self) -> (Self, bool) {
+                let (a, b) = intrinsics::add_with_overflow(self as $ActualT, rhs as $ActualT);
                 (a as Self, b)
             }
         }
@@ -3120,13 +3446,13 @@ assert_eq!(5", stringify!($SelfT), ".overflowing_sub(2), (3, false));
 assert_eq!(0", stringify!($SelfT), ".overflowing_sub(1), (", stringify!($SelfT), "::MAX, true));",
 $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
-                let (a, b) = unsafe {
-                    intrinsics::sub_with_overflow(self as $ActualT,
-                                                  rhs as $ActualT)
-                };
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_sub(self, rhs: Self) -> (Self, bool) {
+                let (a, b) = intrinsics::sub_with_overflow(self as $ActualT, rhs as $ActualT);
                 (a as Self, b)
             }
         }
@@ -3148,13 +3474,13 @@ $EndFeature, "
         /// assert_eq!(5u32.overflowing_mul(2), (10, false));
         /// assert_eq!(1_000_000_000u32.overflowing_mul(10), (1410065408, true));
         /// ```
-        #[inline]
         #[stable(feature = "wrapping", since = "1.7.0")]
-        pub fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
-            let (a, b) = unsafe {
-                intrinsics::mul_with_overflow(self as $ActualT,
-                                              rhs as $ActualT)
-            };
+        #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+        #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+        #[inline]
+        pub const fn overflowing_mul(self, rhs: Self) -> (Self, bool) {
+            let (a, b) = intrinsics::mul_with_overflow(self as $ActualT, rhs as $ActualT);
             (a as Self, b)
         }
 
@@ -3179,18 +3505,23 @@ Basic usage
 ```"),
             #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             pub fn overflowing_div(self, rhs: Self) -> (Self, bool) {
                 (self / rhs, false)
             }
         }
 
         doc_comment! {
-            concat!("Calculates the quotient of Euclidean division `self.div_euc(rhs)`.
+            concat!("Calculates the quotient of Euclidean division `self.div_euclid(rhs)`.
 
 Returns a tuple of the divisor along with a boolean indicating
 whether an arithmetic overflow would occur. Note that for unsigned
 integers overflow never occurs, so the second value is always
 `false`.
+Since, for the positive integers, all common
+definitions of division are equal, this
+is exactly equal to `self.overflowing_div(rhs)`.
 
 # Panics
 
@@ -3201,12 +3532,13 @@ This function will panic if `rhs` is 0.
 Basic usage
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(5", stringify!($SelfT), ".overflowing_div_euc(2), (2, false));
+assert_eq!(5", stringify!($SelfT), ".overflowing_div_euclid(2), (2, false));
 ```"),
             #[inline]
-            #[unstable(feature = "euclidean_division", issue = "49048")]
-            pub fn overflowing_div_euc(self, rhs: Self) -> (Self, bool) {
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            pub fn overflowing_div_euclid(self, rhs: Self) -> (Self, bool) {
                 (self / rhs, false)
             }
         }
@@ -3232,18 +3564,23 @@ Basic usage
 ```"),
             #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             pub fn overflowing_rem(self, rhs: Self) -> (Self, bool) {
                 (self % rhs, false)
             }
         }
 
         doc_comment! {
-            concat!("Calculates the remainder `self.mod_euc(rhs)` by Euclidean division.
+            concat!("Calculates the remainder `self.rem_euclid(rhs)` as if by Euclidean division.
 
 Returns a tuple of the modulo after dividing along with a boolean
 indicating whether an arithmetic overflow would occur. Note that for
 unsigned integers overflow never occurs, so the second value is
 always `false`.
+Since, for the positive integers, all common
+definitions of division are equal, this operation
+is exactly equal to `self.overflowing_rem(rhs)`.
 
 # Panics
 
@@ -3254,12 +3591,13 @@ This function will panic if `rhs` is 0.
 Basic usage
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(5", stringify!($SelfT), ".overflowing_mod_euc(2), (1, false));
+assert_eq!(5", stringify!($SelfT), ".overflowing_rem_euclid(2), (1, false));
 ```"),
             #[inline]
-            #[unstable(feature = "euclidean_division", issue = "49048")]
-            pub fn overflowing_mod_euc(self, rhs: Self) -> (Self, bool) {
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            pub fn overflowing_rem_euclid(self, rhs: Self) -> (Self, bool) {
                 (self % rhs, false)
             }
         }
@@ -3283,7 +3621,8 @@ assert_eq!(2", stringify!($SelfT), ".overflowing_neg(), (-2i32 as ", stringify!(
 ```"),
             #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_neg(self) -> (Self, bool) {
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            pub const fn overflowing_neg(self) -> (Self, bool) {
                 ((!self).wrapping_add(1), self != 0)
             }
         }
@@ -3305,9 +3644,12 @@ Basic usage
 ", $Feature, "assert_eq!(0x1", stringify!($SelfT), ".overflowing_shl(4), (0x10, false));
 assert_eq!(0x1", stringify!($SelfT), ".overflowing_shl(132), (0x10, true));", $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_shl(self, rhs: u32) -> (Self, bool) {
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_shl(self, rhs: u32) -> (Self, bool) {
                 (self.wrapping_shl(rhs), (rhs > ($BITS - 1)))
             }
         }
@@ -3329,9 +3671,12 @@ Basic usage
 ", $Feature, "assert_eq!(0x10", stringify!($SelfT), ".overflowing_shr(4), (0x1, false));
 assert_eq!(0x10", stringify!($SelfT), ".overflowing_shr(132), (0x1, true));", $EndFeature, "
 ```"),
-            #[inline]
             #[stable(feature = "wrapping", since = "1.7.0")]
-            pub fn overflowing_shr(self, rhs: u32) -> (Self, bool) {
+            #[rustc_const_stable(feature = "const_wrapping_math", since = "1.32.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
+            #[inline]
+            pub const fn overflowing_shr(self, rhs: u32) -> (Self, bool) {
                 (self.wrapping_shr(rhs), (rhs > ($BITS - 1)))
             }
         }
@@ -3347,11 +3692,12 @@ whether an overflow happened.
 Basic usage:
 
 ```
-#![feature(no_panic_pow)]
 ", $Feature, "assert_eq!(3", stringify!($SelfT), ".overflowing_pow(5), (243, false));
 assert_eq!(3u8.overflowing_pow(6), (217, true));", $EndFeature, "
 ```"),
-            #[unstable(feature = "no_panic_pow", issue = "48320")]
+            #[stable(feature = "no_panic_pow", since = "1.34.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             pub fn overflowing_pow(self, mut exp: u32) -> (Self, bool) {
                 let mut base = self;
@@ -3396,6 +3742,8 @@ Basic usage:
 ", $Feature, "assert_eq!(2", stringify!($SelfT), ".pow(5), 32);", $EndFeature, "
 ```"),
         #[stable(feature = "rust1", since = "1.0.0")]
+        #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
         #[inline]
         #[rustc_inherit_overflow_checks]
         pub fn pow(self, mut exp: u32) -> Self {
@@ -3424,42 +3772,56 @@ Basic usage:
             doc_comment! {
             concat!("Performs Euclidean division.
 
-For unsigned types, this is just the same as `self / rhs`.
+Since, for the positive integers, all common
+definitions of division are equal, this
+is exactly equal to `self / rhs`.
+
+# Panics
+
+This function will panic if `rhs` is 0.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(7", stringify!($SelfT), ".div_euc(4), 1); // or any other integer type
+assert_eq!(7", stringify!($SelfT), ".div_euclid(4), 1); // or any other integer type
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             #[rustc_inherit_overflow_checks]
-            pub fn div_euc(self, rhs: Self) -> Self {
+            pub fn div_euclid(self, rhs: Self) -> Self {
                 self / rhs
             }
         }
 
 
         doc_comment! {
-            concat!("Calculates the remainder `self mod rhs` by Euclidean division.
+            concat!("Calculates the least remainder of `self (mod rhs)`.
 
-For unsigned types, this is just the same as `self % rhs`.
+Since, for the positive integers, all common
+definitions of division are equal, this
+is exactly equal to `self % rhs`.
+
+# Panics
+
+This function will panic if `rhs` is 0.
 
 # Examples
 
 Basic usage:
 
 ```
-#![feature(euclidean_division)]
-assert_eq!(7", stringify!($SelfT), ".mod_euc(4), 3); // or any other integer type
+assert_eq!(7", stringify!($SelfT), ".rem_euclid(4), 3); // or any other integer type
 ```"),
-            #[unstable(feature = "euclidean_division", issue = "49048")]
+            #[stable(feature = "euclidean_division", since = "1.38.0")]
+            #[must_use = "this returns the result of the operation, \
+                          without modifying the original"]
             #[inline]
             #[rustc_inherit_overflow_checks]
-            pub fn mod_euc(self, rhs: Self) -> Self {
+            pub fn rem_euclid(self, rhs: Self) -> Self {
                 self % rhs
             }
         }
@@ -3476,9 +3838,10 @@ Basic usage:
 assert!(!10", stringify!($SelfT), ".is_power_of_two());", $EndFeature, "
 ```"),
             #[stable(feature = "rust1", since = "1.0.0")]
+            #[rustc_const_stable(feature = "const_is_power_of_two", since = "1.32.0")]
             #[inline]
-            pub fn is_power_of_two(self) -> bool {
-                (self.wrapping_sub(1)) & self == 0 && !(self == 0)
+            pub const fn is_power_of_two(self) -> bool {
+                self.count_ones() == 1
             }
         }
 
@@ -3495,11 +3858,11 @@ assert!(!10", stringify!($SelfT), ".is_power_of_two());", $EndFeature, "
         fn one_less_than_next_power_of_two(self) -> Self {
             if self <= 1 { return 0; }
 
-            // Because `p > 0`, it cannot consist entirely of leading zeros.
+            let p = self - 1;
+            // SAFETY: Because `p > 0`, it cannot consist entirely of leading zeros.
             // That means the shift is always in-bounds, and some processors
             // (such as intel pre-haswell) have more efficient ctlz
             // intrinsics when the argument is non-zero.
-            let p = self - 1;
             let z = unsafe { intrinsics::ctlz_nonzero(p) };
             <$SelfT>::max_value() >> z
         }
@@ -3507,7 +3870,7 @@ assert!(!10", stringify!($SelfT), ".is_power_of_two());", $EndFeature, "
         doc_comment! {
             concat!("Returns the smallest power of two greater than or equal to `self`.
 
-When return value overflows (i.e. `self > (1 << (N-1))` for type
+When return value overflows (i.e., `self > (1 << (N-1))` for type
 `uN`), it panics in debug mode and return value is wrapped to 0 in
 release mode (the only situation in which method can return 0).
 
@@ -3543,6 +3906,7 @@ assert_eq!(3", stringify!($SelfT), ".checked_next_power_of_two(), Some(4));
 assert_eq!(", stringify!($SelfT), "::max_value().checked_next_power_of_two(), None);",
 $EndFeature, "
 ```"),
+            #[inline]
             #[stable(feature = "rust1", since = "1.0.0")]
             pub fn checked_next_power_of_two(self) -> Option<Self> {
                 self.one_less_than_next_power_of_two().checked_add(1)
@@ -3573,56 +3937,198 @@ $EndFeature, "
             }
         }
 
-        /// Return the memory representation of this integer as a byte array.
-        ///
-        /// The target platform’s native endianness is used.
-        /// Portable code likely wants to use this after [`to_be`] or [`to_le`].
-        ///
-        /// [`to_be`]: #method.to_be
-        /// [`to_le`]: #method.to_le
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let bytes = 0x1234_5678_u32.to_be().to_bytes();
-        /// assert_eq!(bytes, [0x12, 0x34, 0x56, 0x78]);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn to_bytes(self) -> [u8; mem::size_of::<Self>()] {
-            unsafe { mem::transmute(self) }
+        doc_comment! {
+            concat!("Return the memory representation of this integer as a byte array in
+big-endian (network) byte order.
+",
+$to_xe_bytes_doc,
+"
+# Examples
+
+```
+let bytes = ", $swap_op, stringify!($SelfT), ".to_be_bytes();
+assert_eq!(bytes, ", $be_bytes, ");
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn to_be_bytes(self) -> [u8; mem::size_of::<Self>()] {
+                self.to_be().to_ne_bytes()
+            }
         }
 
-        /// Create an integer value from its memory representation as a byte array.
-        ///
-        /// The target platform’s native endianness is used.
-        /// Portable code likely wants to use [`to_be`] or [`to_le`] after this.
-        ///
-        /// [`to_be`]: #method.to_be
-        /// [`to_le`]: #method.to_le
-        ///
-        /// # Examples
-        ///
-        /// ```
-        /// #![feature(int_to_from_bytes)]
-        ///
-        /// let int = u32::from_be(u32::from_bytes([0x12, 0x34, 0x56, 0x78]));
-        /// assert_eq!(int, 0x1234_5678_u32);
-        /// ```
-        #[unstable(feature = "int_to_from_bytes", issue = "52963")]
-        #[inline]
-        pub fn from_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
-            unsafe { mem::transmute(bytes) }
+        doc_comment! {
+            concat!("Return the memory representation of this integer as a byte array in
+little-endian byte order.
+",
+$to_xe_bytes_doc,
+"
+# Examples
+
+```
+let bytes = ", $swap_op, stringify!($SelfT), ".to_le_bytes();
+assert_eq!(bytes, ", $le_bytes, ");
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn to_le_bytes(self) -> [u8; mem::size_of::<Self>()] {
+                self.to_le().to_ne_bytes()
+            }
+        }
+
+        doc_comment! {
+            concat!("
+Return the memory representation of this integer as a byte array in
+native byte order.
+
+As the target platform's native endianness is used, portable code
+should use [`to_be_bytes`] or [`to_le_bytes`], as appropriate,
+instead.
+",
+$to_xe_bytes_doc,
+"
+[`to_be_bytes`]: #method.to_be_bytes
+[`to_le_bytes`]: #method.to_le_bytes
+
+# Examples
+
+```
+let bytes = ", $swap_op, stringify!($SelfT), ".to_ne_bytes();
+assert_eq!(
+    bytes,
+    if cfg!(target_endian = \"big\") {
+        ", $be_bytes, "
+    } else {
+        ", $le_bytes, "
+    }
+);
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn to_ne_bytes(self) -> [u8; mem::size_of::<Self>()] {
+                // SAFETY: integers are plain old datatypes so we can always transmute them to
+                // arrays of bytes
+                unsafe { mem::transmute(self) }
+            }
+        }
+
+        doc_comment! {
+            concat!("Create an integer value from its representation as a byte array in
+big endian.
+",
+$from_xe_bytes_doc,
+"
+# Examples
+
+```
+let value = ", stringify!($SelfT), "::from_be_bytes(", $be_bytes, ");
+assert_eq!(value, ", $swap_op, ");
+```
+
+When starting from a slice rather than an array, fallible conversion APIs can be used:
+
+```
+use std::convert::TryInto;
+
+fn read_be_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<", stringify!($SelfT), ">());
+    *input = rest;
+    ", stringify!($SelfT), "::from_be_bytes(int_bytes.try_into().unwrap())
+}
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn from_be_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
+                Self::from_be(Self::from_ne_bytes(bytes))
+            }
+        }
+
+        doc_comment! {
+            concat!("
+Create an integer value from its representation as a byte array in
+little endian.
+",
+$from_xe_bytes_doc,
+"
+# Examples
+
+```
+let value = ", stringify!($SelfT), "::from_le_bytes(", $le_bytes, ");
+assert_eq!(value, ", $swap_op, ");
+```
+
+When starting from a slice rather than an array, fallible conversion APIs can be used:
+
+```
+use std::convert::TryInto;
+
+fn read_le_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<", stringify!($SelfT), ">());
+    *input = rest;
+    ", stringify!($SelfT), "::from_le_bytes(int_bytes.try_into().unwrap())
+}
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn from_le_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
+                Self::from_le(Self::from_ne_bytes(bytes))
+            }
+        }
+
+        doc_comment! {
+            concat!("Create an integer value from its memory representation as a byte
+array in native endianness.
+
+As the target platform's native endianness is used, portable code
+likely wants to use [`from_be_bytes`] or [`from_le_bytes`], as
+appropriate instead.
+
+[`from_be_bytes`]: #method.from_be_bytes
+[`from_le_bytes`]: #method.from_le_bytes
+",
+$from_xe_bytes_doc,
+"
+# Examples
+
+```
+let value = ", stringify!($SelfT), "::from_ne_bytes(if cfg!(target_endian = \"big\") {
+    ", $be_bytes, "
+} else {
+    ", $le_bytes, "
+});
+assert_eq!(value, ", $swap_op, ");
+```
+
+When starting from a slice rather than an array, fallible conversion APIs can be used:
+
+```
+use std::convert::TryInto;
+
+fn read_ne_", stringify!($SelfT), "(input: &mut &[u8]) -> ", stringify!($SelfT), " {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<", stringify!($SelfT), ">());
+    *input = rest;
+    ", stringify!($SelfT), "::from_ne_bytes(int_bytes.try_into().unwrap())
+}
+```"),
+            #[stable(feature = "int_to_from_bytes", since = "1.32.0")]
+            #[rustc_const_unstable(feature = "const_int_conversion", issue = "53718")]
+            #[inline]
+            pub const fn from_ne_bytes(bytes: [u8; mem::size_of::<Self>()]) -> Self {
+                // SAFETY: integers are plain old datatypes so we can always transmute to them
+                unsafe { mem::transmute(bytes) }
+            }
         }
     }
 }
 
 #[lang = "u8"]
 impl u8 {
-    uint_impl! { u8, u8, 8, 255, "", "", 2, "0x82", "0xa" }
-
+    uint_impl! { u8, u8, 8, 255, "", "", 2, "0x82", "0xa", "0x12", "0x12", "0x48", "[0x12]",
+    "[0x12]", "", "" }
 
     /// Checks if the value is within the ASCII range.
     ///
@@ -3660,7 +4166,8 @@ impl u8 {
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[inline]
     pub fn to_ascii_uppercase(&self) -> u8 {
-        ASCII_UPPERCASE_MAP[*self as usize]
+        // Unset the fith bit if this is a lowercase letter
+        *self & !((self.is_ascii_lowercase() as u8) << 5)
     }
 
     /// Makes a copy of the value in its ASCII lower case equivalent.
@@ -3682,7 +4189,8 @@ impl u8 {
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[inline]
     pub fn to_ascii_lowercase(&self) -> u8 {
-        ASCII_LOWERCASE_MAP[*self as usize]
+        // Set the fith bit if this is an uppercase letter
+        *self | ((self.is_ascii_uppercase() as u8) << 5)
     }
 
     /// Checks that two values are an ASCII case-insensitive match.
@@ -3755,8 +4263,8 @@ impl u8 {
 
     /// Checks if the value is an ASCII alphabetic character:
     ///
-    /// - U+0041 'A' ... U+005A 'Z', or
-    /// - U+0061 'a' ... U+007A 'z'.
+    /// - U+0041 'A' ..= U+005A 'Z', or
+    /// - U+0061 'a' ..= U+007A 'z'.
     ///
     /// # Examples
     ///
@@ -3784,15 +4292,14 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_alphabetic(&self) -> bool {
-        if *self >= 0x80 { return false; }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            L | Lx | U | Ux => true,
-            _ => false
+        match *self {
+            b'A'..=b'Z' | b'a'..=b'z' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII uppercase character:
-    /// U+0041 'A' ... U+005A 'Z'.
+    /// U+0041 'A' ..= U+005A 'Z'.
     ///
     /// # Examples
     ///
@@ -3820,15 +4327,14 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_uppercase(&self) -> bool {
-        if *self >= 0x80 { return false }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            U | Ux => true,
-            _ => false
+        match *self {
+            b'A'..=b'Z' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII lowercase character:
-    /// U+0061 'a' ... U+007A 'z'.
+    /// U+0061 'a' ..= U+007A 'z'.
     ///
     /// # Examples
     ///
@@ -3856,18 +4362,17 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_lowercase(&self) -> bool {
-        if *self >= 0x80 { return false }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            L | Lx => true,
-            _ => false
+        match *self {
+            b'a'..=b'z' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII alphanumeric character:
     ///
-    /// - U+0041 'A' ... U+005A 'Z', or
-    /// - U+0061 'a' ... U+007A 'z', or
-    /// - U+0030 '0' ... U+0039 '9'.
+    /// - U+0041 'A' ..= U+005A 'Z', or
+    /// - U+0061 'a' ..= U+007A 'z', or
+    /// - U+0030 '0' ..= U+0039 '9'.
     ///
     /// # Examples
     ///
@@ -3895,15 +4400,14 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_alphanumeric(&self) -> bool {
-        if *self >= 0x80 { return false }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            D | L | Lx | U | Ux => true,
-            _ => false
+        match *self {
+            b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII decimal digit:
-    /// U+0030 '0' ... U+0039 '9'.
+    /// U+0030 '0' ..= U+0039 '9'.
     ///
     /// # Examples
     ///
@@ -3931,18 +4435,17 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_digit(&self) -> bool {
-        if *self >= 0x80 { return false }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            D => true,
-            _ => false
+        match *self {
+            b'0'..=b'9' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII hexadecimal digit:
     ///
-    /// - U+0030 '0' ... U+0039 '9', or
-    /// - U+0041 'A' ... U+0046 'F', or
-    /// - U+0061 'a' ... U+0066 'f'.
+    /// - U+0030 '0' ..= U+0039 '9', or
+    /// - U+0041 'A' ..= U+0046 'F', or
+    /// - U+0061 'a' ..= U+0066 'f'.
     ///
     /// # Examples
     ///
@@ -3970,19 +4473,18 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_hexdigit(&self) -> bool {
-        if *self >= 0x80 { return false }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            D | Lx | Ux => true,
-            _ => false
+        match *self {
+            b'0'..=b'9' | b'A'..=b'F' | b'a'..=b'f' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII punctuation character:
     ///
-    /// - U+0021 ... U+002F `! " # $ % & ' ( ) * + , - . /`, or
-    /// - U+003A ... U+0040 `: ; < = > ? @`, or
-    /// - U+005B ... U+0060 ``[ \ ] ^ _ ` ``, or
-    /// - U+007B ... U+007E `{ | } ~`
+    /// - U+0021 ..= U+002F `! " # $ % & ' ( ) * + , - . /`, or
+    /// - U+003A ..= U+0040 `: ; < = > ? @`, or
+    /// - U+005B ..= U+0060 ``[ \ ] ^ _ ` ``, or
+    /// - U+007B ..= U+007E `{ | } ~`
     ///
     /// # Examples
     ///
@@ -4010,15 +4512,14 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_punctuation(&self) -> bool {
-        if *self >= 0x80 { return false }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            P => true,
-            _ => false
+        match *self {
+            b'!'..=b'/' | b':'..=b'@' | b'['..=b'`' | b'{'..=b'~' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII graphic character:
-    /// U+0021 '!' ... U+007E '~'.
+    /// U+0021 '!' ..= U+007E '~'.
     ///
     /// # Examples
     ///
@@ -4046,10 +4547,9 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_graphic(&self) -> bool {
-        if *self >= 0x80 { return false; }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            Ux | U | Lx | L | D | P => true,
-            _ => false
+        match *self {
+            b'!'..=b'~' => true,
+            _ => false,
         }
     }
 
@@ -4099,15 +4599,14 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_whitespace(&self) -> bool {
-        if *self >= 0x80 { return false; }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            Cw | W => true,
-            _ => false
+        match *self {
+            b'\t' | b'\n' | b'\x0C' | b'\r' | b' ' => true,
+            _ => false,
         }
     }
 
     /// Checks if the value is an ASCII control character:
-    /// U+0000 NUL ... U+001F UNIT SEPARATOR, or U+007F DELETE.
+    /// U+0000 NUL ..= U+001F UNIT SEPARATOR, or U+007F DELETE.
     /// Note that most ASCII whitespace characters are control
     /// characters, but SPACE is not.
     ///
@@ -4137,51 +4636,69 @@ impl u8 {
     #[stable(feature = "ascii_ctype_on_intrinsics", since = "1.24.0")]
     #[inline]
     pub fn is_ascii_control(&self) -> bool {
-        if *self >= 0x80 { return false; }
-        match ASCII_CHARACTER_CLASS[*self as usize] {
-            C | Cw => true,
-            _ => false
+        match *self {
+            b'\0'..=b'\x1F' | b'\x7F' => true,
+            _ => false,
         }
     }
 }
 
 #[lang = "u16"]
 impl u16 {
-    uint_impl! { u16, u16, 16, 65535, "", "", 4, "0xa003", "0x3a" }
+    uint_impl! { u16, u16, 16, 65535, "", "", 4, "0xa003", "0x3a", "0x1234", "0x3412", "0x2c48",
+    "[0x34, 0x12]", "[0x12, 0x34]", "", "" }
 }
 
 #[lang = "u32"]
 impl u32 {
-    uint_impl! { u32, u32, 32, 4294967295, "", "", 8, "0x10000b3", "0xb301" }
+    uint_impl! { u32, u32, 32, 4294967295, "", "", 8, "0x10000b3", "0xb301", "0x12345678",
+    "0x78563412", "0x1e6a2c48", "[0x78, 0x56, 0x34, 0x12]", "[0x12, 0x34, 0x56, 0x78]", "", "" }
 }
 
 #[lang = "u64"]
 impl u64 {
-    uint_impl! { u64, u64, 64, 18446744073709551615, "", "", 12, "0xaa00000000006e1", "0x6e10aa" }
+    uint_impl! { u64, u64, 64, 18446744073709551615, "", "", 12, "0xaa00000000006e1", "0x6e10aa",
+    "0x1234567890123456", "0x5634129078563412", "0x6a2c48091e6a2c48",
+    "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
+    "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
+    "", ""}
 }
 
 #[lang = "u128"]
 impl u128 {
     uint_impl! { u128, u128, 128, 340282366920938463463374607431768211455, "", "", 16,
-        "0x13f40000000000000000000000004f76", "0x4f7613f4" }
+    "0x13f40000000000000000000000004f76", "0x4f7613f4", "0x12345678901234567890123456789012",
+    "0x12907856341290785634129078563412", "0x48091e6a2c48091e6a2c48091e6a2c48",
+    "[0x12, 0x90, 0x78, 0x56, 0x34, 0x12, 0x90, 0x78, \
+      0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
+    "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56, \
+      0x78, 0x90, 0x12, 0x34, 0x56, 0x78, 0x90, 0x12]",
+     "", ""}
 }
 
 #[cfg(target_pointer_width = "16")]
 #[lang = "usize"]
 impl usize {
-    uint_impl! { usize, u16, 16, 65536, "", "", 4, "0xa003", "0x3a" }
+    uint_impl! { usize, u16, 16, 65535, "", "", 4, "0xa003", "0x3a", "0x1234", "0x3412", "0x2c48",
+    "[0x34, 0x12]", "[0x12, 0x34]",
+    usize_isize_to_xe_bytes_doc!(), usize_isize_from_xe_bytes_doc!() }
 }
 #[cfg(target_pointer_width = "32")]
 #[lang = "usize"]
 impl usize {
-    uint_impl! { usize, u32, 32, 4294967295, "", "", 8, "0x10000b3", "0xb301" }
+    uint_impl! { usize, u32, 32, 4294967295, "", "", 8, "0x10000b3", "0xb301", "0x12345678",
+    "0x78563412", "0x1e6a2c48", "[0x78, 0x56, 0x34, 0x12]", "[0x12, 0x34, 0x56, 0x78]",
+    usize_isize_to_xe_bytes_doc!(), usize_isize_from_xe_bytes_doc!() }
 }
 
 #[cfg(target_pointer_width = "64")]
 #[lang = "usize"]
 impl usize {
-    uint_impl! { usize, u64, 64, 18446744073709551615, "", "", 12, "0xaa00000000006e1",
-        "0x6e10aa" }
+    uint_impl! { usize, u64, 64, 18446744073709551615, "", "", 12, "0xaa00000000006e1", "0x6e10aa",
+    "0x1234567890123456", "0x5634129078563412", "0x6a2c48091e6a2c48",
+    "[0x56, 0x34, 0x12, 0x90, 0x78, 0x56, 0x34, 0x12]",
+     "[0x12, 0x34, 0x56, 0x78, 0x90, 0x12, 0x34, 0x56]",
+    usize_isize_to_xe_bytes_doc!(), usize_isize_from_xe_bytes_doc!() }
 }
 
 /// A classification of floating point numbers.
@@ -4248,221 +4765,45 @@ macro_rules! from_str_radix_int_impl {
 from_str_radix_int_impl! { isize i8 i16 i32 i64 i128 usize u8 u16 u32 u64 u128 }
 
 /// The error type returned when a checked integral type conversion fails.
-#[unstable(feature = "try_from", issue = "33417")]
-#[derive(Debug, Copy, Clone)]
-pub struct TryFromIntError(());
+#[stable(feature = "try_from", since = "1.34.0")]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct TryFromIntError(pub(crate) ());
 
 impl TryFromIntError {
-    #[unstable(feature = "int_error_internals",
-               reason = "available through Error trait and this method should \
-                         not be exposed publicly",
-               issue = "0")]
+    #[unstable(
+        feature = "int_error_internals",
+        reason = "available through Error trait and this method should \
+                  not be exposed publicly",
+        issue = "none"
+    )]
     #[doc(hidden)]
     pub fn __description(&self) -> &str {
         "out of range integral type conversion attempted"
     }
 }
 
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
 impl fmt::Display for TryFromIntError {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.__description().fmt(fmt)
     }
 }
 
-#[unstable(feature = "try_from", issue = "33417")]
-impl From<!> for TryFromIntError {
-    fn from(never: !) -> TryFromIntError {
-        never
+#[stable(feature = "try_from", since = "1.34.0")]
+impl From<Infallible> for TryFromIntError {
+    fn from(x: Infallible) -> TryFromIntError {
+        match x {}
     }
 }
 
-// no possible bounds violation
-macro_rules! try_from_unbounded {
-    ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
-        impl TryFrom<$source> for $target {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(value: $source) -> Result<Self, Self::Error> {
-                Ok(value as $target)
-            }
-        }
-    )*}
-}
-
-// only negative bounds
-macro_rules! try_from_lower_bounded {
-    ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
-        impl TryFrom<$source> for $target {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(u: $source) -> Result<$target, TryFromIntError> {
-                if u >= 0 {
-                    Ok(u as $target)
-                } else {
-                    Err(TryFromIntError(()))
-                }
-            }
-        }
-    )*}
-}
-
-// unsigned to signed (only positive bound)
-macro_rules! try_from_upper_bounded {
-    ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
-        impl TryFrom<$source> for $target {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(u: $source) -> Result<$target, TryFromIntError> {
-                if u > (<$target>::max_value() as $source) {
-                    Err(TryFromIntError(()))
-                } else {
-                    Ok(u as $target)
-                }
-            }
-        }
-    )*}
-}
-
-// all other cases
-macro_rules! try_from_both_bounded {
-    ($source:ty, $($target:ty),*) => {$(
-        #[unstable(feature = "try_from", issue = "33417")]
-        impl TryFrom<$source> for $target {
-            type Error = TryFromIntError;
-
-            #[inline]
-            fn try_from(u: $source) -> Result<$target, TryFromIntError> {
-                let min = <$target>::min_value() as $source;
-                let max = <$target>::max_value() as $source;
-                if u < min || u > max {
-                    Err(TryFromIntError(()))
-                } else {
-                    Ok(u as $target)
-                }
-            }
-        }
-    )*}
-}
-
-macro_rules! rev {
-    ($mac:ident, $source:ty, $($target:ty),*) => {$(
-        $mac!($target, $source);
-    )*}
-}
-
-/// intra-sign conversions
-try_from_upper_bounded!(u16, u8);
-try_from_upper_bounded!(u32, u16, u8);
-try_from_upper_bounded!(u64, u32, u16, u8);
-try_from_upper_bounded!(u128, u64, u32, u16, u8);
-
-try_from_both_bounded!(i16, i8);
-try_from_both_bounded!(i32, i16, i8);
-try_from_both_bounded!(i64, i32, i16, i8);
-try_from_both_bounded!(i128, i64, i32, i16, i8);
-
-// unsigned-to-signed
-try_from_upper_bounded!(u8, i8);
-try_from_upper_bounded!(u16, i8, i16);
-try_from_upper_bounded!(u32, i8, i16, i32);
-try_from_upper_bounded!(u64, i8, i16, i32, i64);
-try_from_upper_bounded!(u128, i8, i16, i32, i64, i128);
-
-// signed-to-unsigned
-try_from_lower_bounded!(i8, u8, u16, u32, u64, u128);
-try_from_lower_bounded!(i16, u16, u32, u64, u128);
-try_from_lower_bounded!(i32, u32, u64, u128);
-try_from_lower_bounded!(i64, u64, u128);
-try_from_lower_bounded!(i128, u128);
-try_from_both_bounded!(i16, u8);
-try_from_both_bounded!(i32, u16, u8);
-try_from_both_bounded!(i64, u32, u16, u8);
-try_from_both_bounded!(i128, u64, u32, u16, u8);
-
-// usize/isize
-try_from_upper_bounded!(usize, isize);
-try_from_lower_bounded!(isize, usize);
-
-#[cfg(target_pointer_width = "16")]
-mod ptr_try_from_impls {
-    use super::TryFromIntError;
-    use convert::TryFrom;
-
-    try_from_upper_bounded!(usize, u8);
-    try_from_unbounded!(usize, u16, u32, u64, u128);
-    try_from_upper_bounded!(usize, i8, i16);
-    try_from_unbounded!(usize, i32, i64, i128);
-
-    try_from_both_bounded!(isize, u8);
-    try_from_lower_bounded!(isize, u16, u32, u64, u128);
-    try_from_both_bounded!(isize, i8);
-    try_from_unbounded!(isize, i16, i32, i64, i128);
-
-    rev!(try_from_upper_bounded, usize, u32, u64, u128);
-    rev!(try_from_lower_bounded, usize, i8, i16);
-    rev!(try_from_both_bounded, usize, i32, i64, i128);
-
-    rev!(try_from_upper_bounded, isize, u16, u32, u64, u128);
-    rev!(try_from_both_bounded, isize, i32, i64, i128);
-}
-
-#[cfg(target_pointer_width = "32")]
-mod ptr_try_from_impls {
-    use super::TryFromIntError;
-    use convert::TryFrom;
-
-    try_from_upper_bounded!(usize, u8, u16);
-    try_from_unbounded!(usize, u32, u64, u128);
-    try_from_upper_bounded!(usize, i8, i16, i32);
-    try_from_unbounded!(usize, i64, i128);
-
-    try_from_both_bounded!(isize, u8, u16);
-    try_from_lower_bounded!(isize, u32, u64, u128);
-    try_from_both_bounded!(isize, i8, i16);
-    try_from_unbounded!(isize, i32, i64, i128);
-
-    rev!(try_from_unbounded, usize, u32);
-    rev!(try_from_upper_bounded, usize, u64, u128);
-    rev!(try_from_lower_bounded, usize, i8, i16, i32);
-    rev!(try_from_both_bounded, usize, i64, i128);
-
-    rev!(try_from_unbounded, isize, u16);
-    rev!(try_from_upper_bounded, isize, u32, u64, u128);
-    rev!(try_from_unbounded, isize, i32);
-    rev!(try_from_both_bounded, isize, i64, i128);
-}
-
-#[cfg(target_pointer_width = "64")]
-mod ptr_try_from_impls {
-    use super::TryFromIntError;
-    use convert::TryFrom;
-
-    try_from_upper_bounded!(usize, u8, u16, u32);
-    try_from_unbounded!(usize, u64, u128);
-    try_from_upper_bounded!(usize, i8, i16, i32, i64);
-    try_from_unbounded!(usize, i128);
-
-    try_from_both_bounded!(isize, u8, u16, u32);
-    try_from_lower_bounded!(isize, u64, u128);
-    try_from_both_bounded!(isize, i8, i16, i32);
-    try_from_unbounded!(isize, i64, i128);
-
-    rev!(try_from_unbounded, usize, u32, u64);
-    rev!(try_from_upper_bounded, usize, u128);
-    rev!(try_from_lower_bounded, usize, i8, i16, i32, i64);
-    rev!(try_from_both_bounded, usize, i128);
-
-    rev!(try_from_unbounded, isize, u16, u32);
-    rev!(try_from_upper_bounded, isize, u64, u128);
-    rev!(try_from_unbounded, isize, i32, i64);
-    rev!(try_from_both_bounded, isize, i128);
+#[unstable(feature = "never_type", issue = "35121")]
+impl From<!> for TryFromIntError {
+    fn from(never: !) -> TryFromIntError {
+        // Match rather than coerce to make sure that code like
+        // `From<Infallible> for TryFromIntError` above will keep working
+        // when `Infallible` becomes an alias to `!`.
+        match never {}
+    }
 }
 
 #[doc(hidden)]
@@ -4503,9 +4844,11 @@ fn from_str_radix<T: FromStrRadixHelper>(src: &str, radix: u32) -> Result<T, Par
     use self::IntErrorKind::*;
     use self::ParseIntError as PIE;
 
-    assert!(radix >= 2 && radix <= 36,
-           "from_str_radix_int: must lie in the range `[2, 36]` - found {}",
-           radix);
+    assert!(
+        radix >= 2 && radix <= 36,
+        "from_str_radix_int: must lie in the range `[2, 36]` - found {}",
+        radix
+    );
 
     if src.is_empty() {
         return Err(PIE { kind: Empty });
@@ -4574,7 +4917,7 @@ fn from_str_radix<T: FromStrRadixHelper>(src: &str, radix: u32) -> Result<T, Par
 /// # Potential causes
 ///
 /// Among other causes, `ParseIntError` can be thrown because of leading or trailing whitespace
-/// in the string e.g. when it is obtained from the standard input.
+/// in the string e.g., when it is obtained from the standard input.
 /// Using the [`str.trim()`] method ensures that no whitespace remains before parsing.
 ///
 /// [`str.trim()`]: ../../std/primitive.str.html#method.trim
@@ -4585,19 +4928,53 @@ pub struct ParseIntError {
     kind: IntErrorKind,
 }
 
+/// Enum to store the various types of errors that can cause parsing an integer to fail.
+#[unstable(
+    feature = "int_error_matching",
+    reason = "it can be useful to match errors when making error messages \
+              for integer parsing",
+    issue = "22639"
+)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum IntErrorKind {
+#[non_exhaustive]
+pub enum IntErrorKind {
+    /// Value being parsed is empty.
+    ///
+    /// Among other causes, this variant will be constructed when parsing an empty string.
     Empty,
+    /// Contains an invalid digit.
+    ///
+    /// Among other causes, this variant will be constructed when parsing a string that
+    /// contains a letter.
     InvalidDigit,
+    /// Integer is too large to store in target integer type.
     Overflow,
+    /// Integer is too small to store in target integer type.
     Underflow,
+    /// Value was Zero
+    ///
+    /// This variant will be emitted when the parsing string has a value of zero, which
+    /// would be illegal for non-zero types.
+    Zero,
 }
 
 impl ParseIntError {
-    #[unstable(feature = "int_error_internals",
-               reason = "available through Error trait and this method should \
-                         not be exposed publicly",
-               issue = "0")]
+    /// Outputs the detailed cause of parsing an integer failing.
+    #[unstable(
+        feature = "int_error_matching",
+        reason = "it can be useful to match errors when making error messages \
+                  for integer parsing",
+        issue = "22639"
+    )]
+    pub fn kind(&self) -> &IntErrorKind {
+        &self.kind
+    }
+    #[unstable(
+        feature = "int_error_internals",
+        reason = "available through Error trait and this method should \
+                  not be exposed publicly",
+        issue = "none"
+    )]
     #[doc(hidden)]
     pub fn __description(&self) -> &str {
         match self.kind {
@@ -4605,247 +4982,17 @@ impl ParseIntError {
             IntErrorKind::InvalidDigit => "invalid digit found in string",
             IntErrorKind::Overflow => "number too large to fit in target type",
             IntErrorKind::Underflow => "number too small to fit in target type",
+            IntErrorKind::Zero => "number would be zero for non-zero type",
         }
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl fmt::Display for ParseIntError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.__description().fmt(f)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use num::dec2flt::ParseFloatError;
-
-// Conversion traits for primitive integer and float types
-// Conversions T -> T are covered by a blanket impl and therefore excluded
-// Some conversions from and to usize/isize are not implemented due to portability concerns
-macro_rules! impl_from {
-    ($Small: ty, $Large: ty, #[$attr:meta], $doc: expr) => {
-        #[$attr]
-        #[doc = $doc]
-        impl From<$Small> for $Large {
-            #[inline]
-            fn from(small: $Small) -> $Large {
-                small as $Large
-            }
-        }
-    };
-    ($Small: ty, $Large: ty, #[$attr:meta]) => {
-        impl_from!($Small,
-                   $Large,
-                   #[$attr],
-                   concat!("Converts `",
-                           stringify!($Small),
-                           "` to `",
-                           stringify!($Large),
-                           "` losslessly."));
-    }
-}
-
-macro_rules! impl_from_bool {
-    ($target: ty, #[$attr:meta]) => {
-        impl_from!(bool, $target, #[$attr], concat!("Converts a `bool` to a `",
-            stringify!($target), "`. The resulting value is `0` for `false` and `1` for `true`
-values.
-
-# Examples
-
-```
-assert_eq!(", stringify!($target), "::from(true), 1);
-assert_eq!(", stringify!($target), "::from(false), 0);
-```"));
-    };
-}
-
-// Bool -> Any
-impl_from_bool! { u8, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { u16, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { u32, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { u64, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { u128, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { usize, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { i8, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { i16, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { i32, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { i64, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { i128, #[stable(feature = "from_bool", since = "1.28.0")] }
-impl_from_bool! { isize, #[stable(feature = "from_bool", since = "1.28.0")] }
-
-// Unsigned -> Unsigned
-impl_from! { u8, u16, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u8, u32, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u8, u64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u8, u128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { u8, usize, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u16, u32, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u16, u64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u16, u128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { u32, u64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u32, u128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { u64, u128, #[stable(feature = "i128", since = "1.26.0")] }
-
-// Signed -> Signed
-impl_from! { i8, i16, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i8, i32, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i8, i64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i8, i128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { i8, isize, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i16, i32, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i16, i64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i16, i128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { i32, i64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { i32, i128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { i64, i128, #[stable(feature = "i128", since = "1.26.0")] }
-
-// Unsigned -> Signed
-impl_from! { u8, i16, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u8, i32, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u8, i64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u8, i128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { u16, i32, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u16, i64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u16, i128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { u32, i64, #[stable(feature = "lossless_int_conv", since = "1.5.0")] }
-impl_from! { u32, i128, #[stable(feature = "i128", since = "1.26.0")] }
-impl_from! { u64, i128, #[stable(feature = "i128", since = "1.26.0")] }
-
-// The C99 standard defines bounds on INTPTR_MIN, INTPTR_MAX, and UINTPTR_MAX
-// which imply that pointer-sized integers must be at least 16 bits:
-// https://port70.net/~nsz/c/c99/n1256.html#7.18.2.4
-impl_from! { u16, usize, #[stable(feature = "lossless_iusize_conv", since = "1.26.0")] }
-impl_from! { u8, isize, #[stable(feature = "lossless_iusize_conv", since = "1.26.0")] }
-impl_from! { i16, isize, #[stable(feature = "lossless_iusize_conv", since = "1.26.0")] }
-
-// RISC-V defines the possibility of a 128-bit address space (RV128).
-
-// CHERI proposes 256-bit “capabilities”. Unclear if this would be relevant to usize/isize.
-// https://www.cl.cam.ac.uk/research/security/ctsrd/pdfs/20171017a-cheri-poster.pdf
-// http://www.csl.sri.com/users/neumann/2012resolve-cheri.pdf
-
-
-// Note: integers can only be represented with full precision in a float if
-// they fit in the significand, which is 24 bits in f32 and 53 bits in f64.
-// Lossy float conversions are not implemented at this time.
-
-// Signed -> Float
-impl_from! { i8, f32, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { i8, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { i16, f32, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { i16, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { i32, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-
-// Unsigned -> Float
-impl_from! { u8, f32, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { u8, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { u16, f32, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { u16, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-impl_from! { u32, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-
-// Float -> Float
-impl_from! { f32, f64, #[stable(feature = "lossless_float_conv", since = "1.6.0")] }
-
-static ASCII_LOWERCASE_MAP: [u8; 256] = [
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-    b' ', b'!', b'"', b'#', b'$', b'%', b'&', b'\'',
-    b'(', b')', b'*', b'+', b',', b'-', b'.', b'/',
-    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
-    b'8', b'9', b':', b';', b'<', b'=', b'>', b'?',
-    b'@',
-
-          b'a', b'b', b'c', b'd', b'e', b'f', b'g',
-    b'h', b'i', b'j', b'k', b'l', b'm', b'n', b'o',
-    b'p', b'q', b'r', b's', b't', b'u', b'v', b'w',
-    b'x', b'y', b'z',
-
-                      b'[', b'\\', b']', b'^', b'_',
-    b'`', b'a', b'b', b'c', b'd', b'e', b'f', b'g',
-    b'h', b'i', b'j', b'k', b'l', b'm', b'n', b'o',
-    b'p', b'q', b'r', b's', b't', b'u', b'v', b'w',
-    b'x', b'y', b'z', b'{', b'|', b'}', b'~', 0x7f,
-    0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
-    0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
-    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
-    0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
-    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
-    0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
-    0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
-    0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf,
-    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7,
-    0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
-    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7,
-    0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
-    0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
-    0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
-    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7,
-    0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff,
-];
-
-static ASCII_UPPERCASE_MAP: [u8; 256] = [
-    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
-    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
-    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
-    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
-    b' ', b'!', b'"', b'#', b'$', b'%', b'&', b'\'',
-    b'(', b')', b'*', b'+', b',', b'-', b'.', b'/',
-    b'0', b'1', b'2', b'3', b'4', b'5', b'6', b'7',
-    b'8', b'9', b':', b';', b'<', b'=', b'>', b'?',
-    b'@', b'A', b'B', b'C', b'D', b'E', b'F', b'G',
-    b'H', b'I', b'J', b'K', b'L', b'M', b'N', b'O',
-    b'P', b'Q', b'R', b'S', b'T', b'U', b'V', b'W',
-    b'X', b'Y', b'Z', b'[', b'\\', b']', b'^', b'_',
-    b'`',
-
-          b'A', b'B', b'C', b'D', b'E', b'F', b'G',
-    b'H', b'I', b'J', b'K', b'L', b'M', b'N', b'O',
-    b'P', b'Q', b'R', b'S', b'T', b'U', b'V', b'W',
-    b'X', b'Y', b'Z',
-
-                      b'{', b'|', b'}', b'~', 0x7f,
-    0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87,
-    0x88, 0x89, 0x8a, 0x8b, 0x8c, 0x8d, 0x8e, 0x8f,
-    0x90, 0x91, 0x92, 0x93, 0x94, 0x95, 0x96, 0x97,
-    0x98, 0x99, 0x9a, 0x9b, 0x9c, 0x9d, 0x9e, 0x9f,
-    0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
-    0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
-    0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
-    0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf,
-    0xc0, 0xc1, 0xc2, 0xc3, 0xc4, 0xc5, 0xc6, 0xc7,
-    0xc8, 0xc9, 0xca, 0xcb, 0xcc, 0xcd, 0xce, 0xcf,
-    0xd0, 0xd1, 0xd2, 0xd3, 0xd4, 0xd5, 0xd6, 0xd7,
-    0xd8, 0xd9, 0xda, 0xdb, 0xdc, 0xdd, 0xde, 0xdf,
-    0xe0, 0xe1, 0xe2, 0xe3, 0xe4, 0xe5, 0xe6, 0xe7,
-    0xe8, 0xe9, 0xea, 0xeb, 0xec, 0xed, 0xee, 0xef,
-    0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7,
-    0xf8, 0xf9, 0xfa, 0xfb, 0xfc, 0xfd, 0xfe, 0xff,
-];
-
-enum AsciiCharacterClass {
-    C,  // control
-    Cw, // control whitespace
-    W,  // whitespace
-    D,  // digit
-    L,  // lowercase
-    Lx, // lowercase hex digit
-    U,  // uppercase
-    Ux, // uppercase hex digit
-    P,  // punctuation
-}
-use self::AsciiCharacterClass::*;
-
-static ASCII_CHARACTER_CLASS: [AsciiCharacterClass; 128] = [
-//  _0 _1 _2 _3 _4 _5 _6 _7 _8 _9 _a _b _c _d _e _f
-    C, C, C, C, C, C, C, C, C, Cw,Cw,C, Cw,Cw,C, C, // 0_
-    C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, C, // 1_
-    W, P, P, P, P, P, P, P, P, P, P, P, P, P, P, P, // 2_
-    D, D, D, D, D, D, D, D, D, D, P, P, P, P, P, P, // 3_
-    P, Ux,Ux,Ux,Ux,Ux,Ux,U, U, U, U, U, U, U, U, U, // 4_
-    U, U, U, U, U, U, U, U, U, U, U, P, P, P, P, P, // 5_
-    P, Lx,Lx,Lx,Lx,Lx,Lx,L, L, L, L, L, L, L, L, L, // 6_
-    L, L, L, L, L, L, L, L, L, L, L, P, P, P, P, C, // 7_
-];
+pub use crate::num::dec2flt::ParseFloatError;

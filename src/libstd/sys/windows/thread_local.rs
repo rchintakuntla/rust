@@ -1,21 +1,11 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use mem;
-use ptr;
-use sync::atomic::AtomicPtr;
-use sync::atomic::Ordering::SeqCst;
-use sys::c;
+use crate::mem;
+use crate::ptr;
+use crate::sync::atomic::AtomicPtr;
+use crate::sync::atomic::Ordering::SeqCst;
+use crate::sys::c;
 
 pub type Key = c::DWORD;
-pub type Dtor = unsafe extern fn(*mut u8);
+pub type Dtor = unsafe extern "C" fn(*mut u8);
 
 // Turns out, like pretty much everything, Windows is pretty close the
 // functionality that Unix provides, but slightly different! In the case of
@@ -62,7 +52,7 @@ pub unsafe fn create(dtor: Option<Dtor>) -> Key {
     if let Some(f) = dtor {
         register_dtor(key, f);
     }
-    return key;
+    key
 }
 
 #[inline]
@@ -121,11 +111,7 @@ struct Node {
 }
 
 unsafe fn register_dtor(key: Key, dtor: Dtor) {
-    let mut node = Box::new(Node {
-        key,
-        dtor,
-        next: ptr::null_mut(),
-    });
+    let mut node = Box::new(Node { key, dtor, next: ptr::null_mut() });
 
     let mut head = DTORS.load(SeqCst);
     loop {
@@ -202,15 +188,12 @@ unsafe fn register_dtor(key: Key, dtor: Dtor) {
 #[link_section = ".CRT$XLB"]
 #[allow(dead_code, unused_variables)]
 #[used] // we don't want LLVM eliminating this symbol for any reason, and
-        // when the symbol makes it to the linker the linker will take over
-pub static p_thread_callback: unsafe extern "system" fn(c::LPVOID, c::DWORD,
-                                                        c::LPVOID) =
-        on_tls_callback;
+// when the symbol makes it to the linker the linker will take over
+pub static p_thread_callback: unsafe extern "system" fn(c::LPVOID, c::DWORD, c::LPVOID) =
+    on_tls_callback;
 
 #[allow(dead_code, unused_variables)]
-unsafe extern "system" fn on_tls_callback(h: c::LPVOID,
-                                          dwReason: c::DWORD,
-                                          pv: c::LPVOID) {
+unsafe extern "system" fn on_tls_callback(h: c::LPVOID, dwReason: c::DWORD, pv: c::LPVOID) {
     if dwReason == c::DLL_THREAD_DETACH || dwReason == c::DLL_PROCESS_DETACH {
         run_dtors();
     }
@@ -220,8 +203,10 @@ unsafe extern "system" fn on_tls_callback(h: c::LPVOID,
     reference_tls_used();
     #[cfg(target_env = "msvc")]
     unsafe fn reference_tls_used() {
-        extern { static _tls_used: u8; }
-        ::intrinsics::volatile_load(&_tls_used);
+        extern "C" {
+            static _tls_used: u8;
+        }
+        crate::intrinsics::volatile_load(&_tls_used);
     }
     #[cfg(not(target_env = "msvc"))]
     unsafe fn reference_tls_used() {}
@@ -232,7 +217,7 @@ unsafe fn run_dtors() {
     let mut any_run = true;
     for _ in 0..5 {
         if !any_run {
-            break
+            break;
         }
         any_run = false;
         let mut cur = DTORS.load(SeqCst);

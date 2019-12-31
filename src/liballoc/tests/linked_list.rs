@@ -1,14 +1,5 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::collections::LinkedList;
+use std::panic::catch_unwind;
 
 #[test]
 fn test_basic() {
@@ -50,12 +41,10 @@ fn test_basic() {
     assert_eq!(n.pop_front(), Some(1));
 }
 
-#[cfg(test)]
 fn generate_test() -> LinkedList<i32> {
     list_from(&[0, 1, 2, 3, 4, 5, 6])
 }
 
-#[cfg(test)]
 fn list_from<T: Clone>(v: &[T]) -> LinkedList<T> {
     v.iter().cloned().collect()
 }
@@ -114,7 +103,6 @@ fn test_split_off() {
         assert_eq!(m.back(), Some(&1));
         assert_eq!(m.front(), Some(&1));
     }
-
 }
 
 #[test]
@@ -251,10 +239,12 @@ fn test_eq() {
 
 #[test]
 fn test_hash() {
+    use crate::hash;
+
     let mut x = LinkedList::new();
     let mut y = LinkedList::new();
 
-    assert!(::hash(&x) == ::hash(&y));
+    assert!(hash(&x) == hash(&y));
 
     x.push_back(1);
     x.push_back(2);
@@ -264,7 +254,7 @@ fn test_hash() {
     y.push_front(2);
     y.push_front(1);
 
-    assert!(::hash(&x) == ::hash(&y));
+    assert!(hash(&x) == hash(&y));
 }
 
 #[test]
@@ -315,8 +305,7 @@ fn test_show() {
     assert_eq!(format!("{:?}", list), "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]");
 
     let list: LinkedList<_> = vec!["just", "one", "test", "more"].iter().cloned().collect();
-    assert_eq!(format!("{:?}", list),
-               "[\"just\", \"one\", \"test\", \"more\"]");
+    assert_eq!(format!("{:?}", list), "[\"just\", \"one\", \"test\", \"more\"]");
 }
 
 #[test]
@@ -456,19 +445,14 @@ fn drain_filter_true() {
 
 #[test]
 fn drain_filter_complex() {
-
-    {   //                [+xxx++++++xxxxx++++x+x++]
+    {
+        //                [+xxx++++++xxxxx++++x+x++]
         let mut list = vec![
-            1,
-            2, 4, 6,
-            7, 9, 11, 13, 15, 17,
-            18, 20, 22, 24, 26,
-            27, 29, 31, 33,
-            34,
-            35,
-            36,
-            37, 39
-        ].into_iter().collect::<LinkedList<_>>();
+            1, 2, 4, 6, 7, 9, 11, 13, 15, 17, 18, 20, 22, 24, 26, 27, 29, 31, 33, 34, 35, 36, 37,
+            39,
+        ]
+        .into_iter()
+        .collect::<LinkedList<_>>();
 
         let removed = list.drain_filter(|x| *x % 2 == 0).collect::<Vec<_>>();
         assert_eq!(removed.len(), 10);
@@ -481,17 +465,13 @@ fn drain_filter_complex() {
         );
     }
 
-    {   // [xxx++++++xxxxx++++x+x++]
+    {
+        // [xxx++++++xxxxx++++x+x++]
         let mut list = vec![
-            2, 4, 6,
-            7, 9, 11, 13, 15, 17,
-            18, 20, 22, 24, 26,
-            27, 29, 31, 33,
-            34,
-            35,
-            36,
-            37, 39
-        ].into_iter().collect::<LinkedList<_>>();
+            2, 4, 6, 7, 9, 11, 13, 15, 17, 18, 20, 22, 24, 26, 27, 29, 31, 33, 34, 35, 36, 37, 39,
+        ]
+        .into_iter()
+        .collect::<LinkedList<_>>();
 
         let removed = list.drain_filter(|x| *x % 2 == 0).collect::<Vec<_>>();
         assert_eq!(removed.len(), 10);
@@ -504,16 +484,12 @@ fn drain_filter_complex() {
         );
     }
 
-    {   // [xxx++++++xxxxx++++x+x]
-        let mut list = vec![
-            2, 4, 6,
-            7, 9, 11, 13, 15, 17,
-            18, 20, 22, 24, 26,
-            27, 29, 31, 33,
-            34,
-            35,
-            36
-        ].into_iter().collect::<LinkedList<_>>();
+    {
+        // [xxx++++++xxxxx++++x+x]
+        let mut list =
+            vec![2, 4, 6, 7, 9, 11, 13, 15, 17, 18, 20, 22, 24, 26, 27, 29, 31, 33, 34, 35, 36]
+                .into_iter()
+                .collect::<LinkedList<_>>();
 
         let removed = list.drain_filter(|x| *x % 2 == 0).collect::<Vec<_>>();
         assert_eq!(removed.len(), 10);
@@ -526,11 +502,11 @@ fn drain_filter_complex() {
         );
     }
 
-    {   // [xxxxxxxxxx+++++++++++]
-        let mut list = vec![
-            2, 4, 6, 8, 10, 12, 14, 16, 18, 20,
-            1, 3, 5, 7, 9, 11, 13, 15, 17, 19
-        ].into_iter().collect::<LinkedList<_>>();
+    {
+        // [xxxxxxxxxx+++++++++++]
+        let mut list = vec![2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+            .into_iter()
+            .collect::<LinkedList<_>>();
 
         let removed = list.drain_filter(|x| *x % 2 == 0).collect::<Vec<_>>();
         assert_eq!(removed.len(), 10);
@@ -540,11 +516,11 @@ fn drain_filter_complex() {
         assert_eq!(list.into_iter().collect::<Vec<_>>(), vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19]);
     }
 
-    {   // [+++++++++++xxxxxxxxxx]
-        let mut list = vec![
-            1, 3, 5, 7, 9, 11, 13, 15, 17, 19,
-            2, 4, 6, 8, 10, 12, 14, 16, 18, 20
-        ].into_iter().collect::<LinkedList<_>>();
+    {
+        // [+++++++++++xxxxxxxxxx]
+        let mut list = vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20]
+            .into_iter()
+            .collect::<LinkedList<_>>();
 
         let removed = list.drain_filter(|x| *x % 2 == 0).collect::<Vec<_>>();
         assert_eq!(removed.len(), 10);
@@ -553,4 +529,109 @@ fn drain_filter_complex() {
         assert_eq!(list.len(), 10);
         assert_eq!(list.into_iter().collect::<Vec<_>>(), vec![1, 3, 5, 7, 9, 11, 13, 15, 17, 19]);
     }
+}
+
+#[test]
+fn test_drop() {
+    static mut DROPS: i32 = 0;
+    struct Elem;
+    impl Drop for Elem {
+        fn drop(&mut self) {
+            unsafe {
+                DROPS += 1;
+            }
+        }
+    }
+
+    let mut ring = LinkedList::new();
+    ring.push_back(Elem);
+    ring.push_front(Elem);
+    ring.push_back(Elem);
+    ring.push_front(Elem);
+    drop(ring);
+
+    assert_eq!(unsafe { DROPS }, 4);
+}
+
+#[test]
+fn test_drop_with_pop() {
+    static mut DROPS: i32 = 0;
+    struct Elem;
+    impl Drop for Elem {
+        fn drop(&mut self) {
+            unsafe {
+                DROPS += 1;
+            }
+        }
+    }
+
+    let mut ring = LinkedList::new();
+    ring.push_back(Elem);
+    ring.push_front(Elem);
+    ring.push_back(Elem);
+    ring.push_front(Elem);
+
+    drop(ring.pop_back());
+    drop(ring.pop_front());
+    assert_eq!(unsafe { DROPS }, 2);
+
+    drop(ring);
+    assert_eq!(unsafe { DROPS }, 4);
+}
+
+#[test]
+fn test_drop_clear() {
+    static mut DROPS: i32 = 0;
+    struct Elem;
+    impl Drop for Elem {
+        fn drop(&mut self) {
+            unsafe {
+                DROPS += 1;
+            }
+        }
+    }
+
+    let mut ring = LinkedList::new();
+    ring.push_back(Elem);
+    ring.push_front(Elem);
+    ring.push_back(Elem);
+    ring.push_front(Elem);
+    ring.clear();
+    assert_eq!(unsafe { DROPS }, 4);
+
+    drop(ring);
+    assert_eq!(unsafe { DROPS }, 4);
+}
+
+#[test]
+fn test_drop_panic() {
+    static mut DROPS: i32 = 0;
+
+    struct D(bool);
+
+    impl Drop for D {
+        fn drop(&mut self) {
+            unsafe {
+                DROPS += 1;
+            }
+
+            if self.0 {
+                panic!("panic in `drop`");
+            }
+        }
+    }
+
+    let mut q = LinkedList::new();
+    q.push_back(D(false));
+    q.push_back(D(false));
+    q.push_back(D(false));
+    q.push_back(D(false));
+    q.push_back(D(false));
+    q.push_front(D(false));
+    q.push_front(D(false));
+    q.push_front(D(true));
+
+    catch_unwind(move || drop(q)).ok();
+
+    assert_eq!(unsafe { DROPS }, 8);
 }

@@ -1,56 +1,37 @@
 //! An interpreter for MIR used in CTFE and by miri
 
 mod cast;
-mod const_eval;
 mod eval_context;
-mod place;
+mod intern;
+mod intrinsics;
 mod machine;
 mod memory;
+mod operand;
 mod operator;
+mod place;
+pub(crate) mod snapshot; // for const_eval
 mod step;
 mod terminator;
 mod traits;
+mod validity;
+mod visitor;
 
-pub use self::eval_context::{
-    EvalContext, Frame, StackPopCleanup,
-    TyAndPacked, ValTy,
-};
+pub use rustc::mir::interpret::*; // have all the `interpret` symbols in one place: here
 
-pub use self::place::{Place, PlaceExtra};
+pub use self::eval_context::{Frame, InterpCx, LocalState, LocalValue, StackPopCleanup};
 
-pub use self::memory::{Memory, MemoryKind, HasMemory};
+pub use self::place::{MPlaceTy, MemPlace, Place, PlaceTy};
 
-pub use self::const_eval::{
-    eval_promoted,
-    mk_borrowck_eval_cx,
-    mk_eval_cx,
-    CompileTimeEvaluator,
-    const_value_to_allocation_provider,
-    const_eval_provider,
-    const_val_field,
-    const_variant_index,
-    value_to_const_value,
-};
+pub use self::memory::{AllocCheck, FnVal, Memory, MemoryKind};
 
-pub use self::machine::Machine;
+pub use self::machine::{AllocMap, Machine, MayLeak, StackPopInfo};
 
-pub use self::memory::{write_target_uint, write_target_int, read_target_uint};
+pub use self::operand::{ImmTy, Immediate, OpTy, Operand, ScalarMaybeUndef};
 
-use rustc::ty::layout::TyLayout;
+pub use self::visitor::{MutValueVisitor, ValueVisitor};
 
-pub fn sign_extend(value: u128, layout: TyLayout<'_>) -> u128 {
-    let size = layout.size.bits();
-    assert!(layout.abi.is_signed());
-    // sign extend
-    let shift = 128 - size;
-    // shift the unsigned value to the left
-    // and back to the right as signed (essentially fills with FF on the left)
-    (((value << shift) as i128) >> shift) as u128
-}
+pub use self::validity::RefTracking;
 
-pub fn truncate(value: u128, layout: TyLayout<'_>) -> u128 {
-    let size = layout.size.bits();
-    let shift = 128 - size;
-    // truncate (shift left to drop out leftover values, shift right to fill with zeroes)
-    (value << shift) >> shift
-}
+pub use self::intern::intern_const_alloc_recursive;
+
+crate use self::intrinsics::eval_nullary_intrinsic;

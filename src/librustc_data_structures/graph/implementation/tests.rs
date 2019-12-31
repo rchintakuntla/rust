@@ -1,14 +1,4 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use graph::implementation::*;
+use crate::graph::implementation::*;
 use std::fmt::Debug;
 
 type TestGraph = Graph<&'static str, &'static str>;
@@ -64,21 +54,22 @@ fn each_edge() {
     });
 }
 
-fn test_adjacent_edges<N: PartialEq + Debug, E: PartialEq + Debug>(graph: &Graph<N, E>,
-                                                                   start_index: NodeIndex,
-                                                                   start_data: N,
-                                                                   expected_incoming: &[(E, N)],
-                                                                   expected_outgoing: &[(E, N)]) {
+fn test_adjacent_edges<N: PartialEq + Debug, E: PartialEq + Debug>(
+    graph: &Graph<N, E>,
+    start_index: NodeIndex,
+    start_data: N,
+    expected_incoming: &[(E, N)],
+    expected_outgoing: &[(E, N)],
+) {
     assert!(graph.node_data(start_index) == &start_data);
 
     let mut counter = 0;
     for (edge_index, edge) in graph.incoming_edges(start_index) {
         assert!(counter < expected_incoming.len());
-        debug!("counter={:?} expected={:?} edge_index={:?} edge={:?}",
-               counter,
-               expected_incoming[counter],
-               edge_index,
-               edge);
+        debug!(
+            "counter={:?} expected={:?} edge_index={:?} edge={:?}",
+            counter, expected_incoming[counter], edge_index, edge
+        );
         match expected_incoming[counter] {
             (ref e, ref n) => {
                 assert!(e == &edge.data);
@@ -93,11 +84,10 @@ fn test_adjacent_edges<N: PartialEq + Debug, E: PartialEq + Debug>(graph: &Graph
     let mut counter = 0;
     for (edge_index, edge) in graph.outgoing_edges(start_index) {
         assert!(counter < expected_outgoing.len());
-        debug!("counter={:?} expected={:?} edge_index={:?} edge={:?}",
-               counter,
-               expected_outgoing[counter],
-               edge_index,
-               edge);
+        debug!(
+            "counter={:?} expected={:?} edge_index={:?} edge={:?}",
+            counter, expected_outgoing[counter], edge_index, edge
+        );
         match expected_outgoing[counter] {
             (ref e, ref n) => {
                 assert!(e == &edge.data);
@@ -119,11 +109,13 @@ fn each_adjacent_from_a() {
 #[test]
 fn each_adjacent_from_b() {
     let graph = create_graph();
-    test_adjacent_edges(&graph,
-                        NodeIndex(1),
-                        "B",
-                        &[("FB", "F"), ("AB", "A")],
-                        &[("BD", "D"), ("BC", "C")]);
+    test_adjacent_edges(
+        &graph,
+        NodeIndex(1),
+        "B",
+        &[("FB", "F"), ("AB", "A")],
+        &[("BD", "D"), ("BC", "C")],
+    );
 }
 
 #[test]

@@ -1,7 +1,7 @@
 # Documentation tests
 
 `rustdoc` supports executing your documentation examples as tests. This makes sure
-that your tests are up to date and working.
+that examples within your documentation are up to date and working.
 
 The basic idea is this:
 
@@ -171,7 +171,7 @@ compiles, while only showing the parts that are relevant to that part of your
 explanation.
 
 The `#`-hiding of lines can be prevented by using two consecutive hashes
-`##`. This only needs to be done with with the first `#` which would've
+`##`. This only needs to be done with the first `#` which would've
 otherwise caused hiding. If we have a string literal like the following,
 which has a line that starts with a `#`:
 
@@ -235,6 +235,23 @@ appears to the reader as the initial idea but works with doc tests:
 /// # }
 /// ```
 ```
+
+As of version 1.34.0, one can also omit the `fn main()`, but you will have to
+disambiguate the error type:
+
+```ignore
+/// ```
+/// use std::io;
+/// let mut input = String::new();
+/// io::stdin().read_line(&mut input)?;
+/// # Ok::<(), io::Error>(())
+/// ```
+```
+
+This is an unfortunate consequence of the `?` operator adding an implicit
+conversion, so type inference fails because the type is not unique. Please note
+that you must write the `(())` in one sequence without intermediate whitespace
+so that rustdoc understands you want an implicit `Result`-returning function.
 
 ## Documenting macros
 
@@ -323,6 +340,22 @@ compiles, then the test will fail. However please note that code failing
 with the current Rust release may work in a future release, as new features
 are added.
 
+```text
+/// Only runs on the 2018 edition.
+///
+/// ```edition2018
+/// let result: Result<i32, ParseIntError> = try {
+///     "1".parse::<i32>()?
+///         + "2".parse::<i32>()?
+///         + "3".parse::<i32>()?
+/// };
+/// ```
+```
+
+`edition2018` tells `rustdoc` that the code sample should be compiled the 2018
+edition of Rust. Similarly, you can specify `edition2015` to compile the code
+with the 2015 edition.
+
 ## Syntax reference
 
 The *exact* syntax for code blocks, including the edge cases, can be found
@@ -346,3 +379,49 @@ However, it's preferable to use fenced code blocks over indented code blocks.
 Not only are fenced code blocks considered more idiomatic for Rust code,
 but there is no way to use directives such as `ignore` or `should_panic` with
 indented code blocks.
+
+### Include items only when collecting doctests
+
+Rustdoc's documentation tests can do some things that regular unit tests can't, so it can
+sometimes be useful to extend your doctests with samples that wouldn't otherwise need to be in
+documentation. To this end, Rustdoc allows you to have certain items only appear when it's
+collecting doctests, so you can utilize doctest functionality without forcing the test to appear in
+docs, or to find an arbitrary private item to include it on.
+
+When compiling a crate for use in doctests (with `--test` option), rustdoc will set `cfg(doctest)`.
+Note that they will still link against only the public items of your crate; if you need to test
+private items, you need to write a unit test.
+
+In this example, we're adding doctests that we know won't compile, to verify that our struct can
+only take in valid data:
+
+```rust
+/// We have a struct here. Remember it doesn't accept negative numbers!
+pub struct MyStruct(pub usize);
+
+/// ```compile_fail
+/// let x = my_crate::MyStruct(-5);
+/// ```
+#[cfg(doctest)]
+pub struct MyStructOnlyTakesUsize;
+```
+
+Note that the struct `MyStructOnlyTakesUsize` here isn't actually part of your public crate
+API. The use of `#[cfg(doctest)]` makes sure that this struct only exists while rustdoc is
+collecting doctests. This means that its doctest is executed when `--test` is passed to rustdoc,
+but is hidden from the public documentation.
+
+Another possible use of `cfg(doctest)` is to test doctests that are included in your README file
+without including it in your main documentation. For example, you could write this into your
+`lib.rs` to test your README as part of your doctests:
+
+```rust,ignore
+#![feature(extern_doc)]
+
+#[doc(include="../README.md")]
+#[cfg(doctest)]
+pub struct ReadmeDoctests;
+```
+
+This will include your README as documentation on the hidden struct `ReadmeDoctests`, which will
+then be tested alongside the rest of your doctests.

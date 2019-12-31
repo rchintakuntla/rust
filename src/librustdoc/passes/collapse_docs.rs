@@ -1,22 +1,16 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+use crate::clean::{self, DocFragment, Item};
+use crate::core::DocContext;
+use crate::fold;
+use crate::fold::DocFolder;
+use crate::passes::Pass;
 
-use clean::{self, DocFragment, Item};
-use fold;
-use fold::DocFolder;
-use passes::Pass;
-use std::mem::replace;
+use std::mem::take;
 
-pub const COLLAPSE_DOCS: Pass =
-    Pass::late("collapse-docs", collapse_docs,
-        "concatenates all document attributes into one document attribute");
+pub const COLLAPSE_DOCS: Pass = Pass {
+    name: "collapse-docs",
+    pass: collapse_docs,
+    description: "concatenates all document attributes into one document attribute",
+};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 enum DocFragmentKind {
@@ -35,8 +29,10 @@ impl DocFragment {
     }
 }
 
-pub fn collapse_docs(krate: clean::Crate) -> clean::Crate {
-    Collapser.fold_crate(krate)
+pub fn collapse_docs(krate: clean::Crate, _: &DocContext<'_>) -> clean::Crate {
+    let mut krate = Collapser.fold_crate(krate);
+    krate.collapsed = true;
+    krate
 }
 
 struct Collapser;
@@ -52,7 +48,7 @@ fn collapse(doc_strings: &mut Vec<DocFragment>) {
     let mut docs = vec![];
     let mut last_frag: Option<DocFragment> = None;
 
-    for frag in replace(doc_strings, vec![]) {
+    for frag in take(doc_strings) {
         if let Some(mut curr_frag) = last_frag.take() {
             let curr_kind = curr_frag.kind();
             let new_kind = frag.kind();
@@ -60,10 +56,10 @@ fn collapse(doc_strings: &mut Vec<DocFragment>) {
             if curr_kind == DocFragmentKind::Include || curr_kind != new_kind {
                 match curr_frag {
                     DocFragment::SugaredDoc(_, _, ref mut doc_string)
-                        | DocFragment::RawDoc(_, _, ref mut doc_string) => {
-                            // add a newline for extra padding between segments
-                            doc_string.push('\n');
-                        }
+                    | DocFragment::RawDoc(_, _, ref mut doc_string) => {
+                        // add a newline for extra padding between segments
+                        doc_string.push('\n');
+                    }
                     _ => {}
                 }
                 docs.push(curr_frag);
@@ -71,11 +67,11 @@ fn collapse(doc_strings: &mut Vec<DocFragment>) {
             } else {
                 match curr_frag {
                     DocFragment::SugaredDoc(_, ref mut span, ref mut doc_string)
-                        | DocFragment::RawDoc(_, ref mut span, ref mut doc_string) => {
-                            doc_string.push('\n');
-                            doc_string.push_str(frag.as_str());
-                            *span = span.to(frag.span());
-                        }
+                    | DocFragment::RawDoc(_, ref mut span, ref mut doc_string) => {
+                        doc_string.push('\n');
+                        doc_string.push_str(frag.as_str());
+                        *span = span.to(frag.span());
+                    }
                     _ => unreachable!(),
                 }
                 last_frag = Some(curr_frag);

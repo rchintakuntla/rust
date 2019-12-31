@@ -1,22 +1,11 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use hir::def_id::DefId;
-use ich::StableHashingContext;
-use rustc_data_structures::stable_hasher::{StableHasher, StableHasherResult,
-                                           HashStable};
+use crate::hir::def_id::DefId;
+use crate::ich::StableHashingContext;
+use crate::ty::{self, Ty, TyCtxt};
+use rustc_data_structures::stable_hasher::{HashStable, StableHasher};
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::mem;
 use syntax::ast;
-use ty::{self, Ty, TyCtxt};
 
 use self::SimplifiedTypeGen::*;
 
@@ -30,7 +19,8 @@ pub type SimplifiedType = SimplifiedTypeGen<DefId>;
 /// the non-stable but fast to construct DefId-version is the better choice.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, RustcEncodable, RustcDecodable)]
 pub enum SimplifiedTypeGen<D>
-    where D: Copy + Debug + Ord + Eq + Hash
+where
+    D: Copy + Debug + Ord + Eq,
 {
     BoolSimplifiedType,
     CharSimplifiedType,
@@ -43,11 +33,14 @@ pub enum SimplifiedTypeGen<D>
     PtrSimplifiedType,
     NeverSimplifiedType,
     TupleSimplifiedType(usize),
+    /// A trait object, all of whose components are markers
+    /// (e.g., `dyn Send + Sync`).
+    MarkerTraitObjectSimplifiedType,
     TraitSimplifiedType(D),
     ClosureSimplifiedType(D),
     GeneratorSimplifiedType(D),
     GeneratorWitnessSimplifiedType(usize),
-    AnonSimplifiedType(D),
+    OpaqueSimplifiedType(D),
     FunctionSimplifiedType(usize),
     ParameterSimplifiedType,
     ForeignSimplifiedType(DefId),
@@ -62,73 +55,65 @@ pub enum SimplifiedTypeGen<D>
 /// then we can't say much about whether two types would unify. Put another way,
 /// `can_simplify_params` should be true if type parameters appear free in `ty` and `false` if they
 /// are to be considered bound.
-pub fn simplify_type<'a, 'gcx, 'tcx>(tcx: TyCtxt<'a, 'gcx, 'tcx>,
-                                     ty: Ty,
-                                     can_simplify_params: bool)
-                                     -> Option<SimplifiedType>
-{
-    match ty.sty {
-        ty::TyBool => Some(BoolSimplifiedType),
-        ty::TyChar => Some(CharSimplifiedType),
-        ty::TyInt(int_type) => Some(IntSimplifiedType(int_type)),
-        ty::TyUint(uint_type) => Some(UintSimplifiedType(uint_type)),
-        ty::TyFloat(float_type) => Some(FloatSimplifiedType(float_type)),
-        ty::TyAdt(def, _) => Some(AdtSimplifiedType(def.did)),
-        ty::TyStr => Some(StrSimplifiedType),
-        ty::TyArray(..) | ty::TySlice(_) => Some(ArraySimplifiedType),
-        ty::TyRawPtr(_) => Some(PtrSimplifiedType),
-        ty::TyDynamic(ref trait_info, ..) => {
-            trait_info.principal().map(|p| TraitSimplifiedType(p.def_id()))
-        }
-        ty::TyRef(_, ty, _) => {
+pub fn simplify_type(
+    tcx: TyCtxt<'_>,
+    ty: Ty<'_>,
+    can_simplify_params: bool,
+) -> Option<SimplifiedType> {
+    match ty.kind {
+        ty::Bool => Some(BoolSimplifiedType),
+        ty::Char => Some(CharSimplifiedType),
+        ty::Int(int_type) => Some(IntSimplifiedType(int_type)),
+        ty::Uint(uint_type) => Some(UintSimplifiedType(uint_type)),
+        ty::Float(float_type) => Some(FloatSimplifiedType(float_type)),
+        ty::Adt(def, _) => Some(AdtSimplifiedType(def.did)),
+        ty::Str => Some(StrSimplifiedType),
+        ty::Array(..) | ty::Slice(_) => Some(ArraySimplifiedType),
+        ty::RawPtr(_) => Some(PtrSimplifiedType),
+        ty::Dynamic(ref trait_info, ..) => match trait_info.principal_def_id() {
+            Some(principal_def_id) if !tcx.trait_is_auto(principal_def_id) => {
+                Some(TraitSimplifiedType(principal_def_id))
+            }
+            _ => Some(MarkerTraitObjectSimplifiedType),
+        },
+        ty::Ref(_, ty, _) => {
             // since we introduce auto-refs during method lookup, we
             // just treat &T and T as equivalent from the point of
             // view of possibly unifying
             simplify_type(tcx, ty, can_simplify_params)
         }
-        ty::TyFnDef(def_id, _) |
-        ty::TyClosure(def_id, _) => {
-            Some(ClosureSimplifiedType(def_id))
-        }
-        ty::TyGenerator(def_id, _, _) => {
-            Some(GeneratorSimplifiedType(def_id))
-        }
-        ty::TyGeneratorWitness(ref tys) => {
+        ty::FnDef(def_id, _) | ty::Closure(def_id, _) => Some(ClosureSimplifiedType(def_id)),
+        ty::Generator(def_id, _, _) => Some(GeneratorSimplifiedType(def_id)),
+        ty::GeneratorWitness(ref tys) => {
             Some(GeneratorWitnessSimplifiedType(tys.skip_binder().len()))
         }
-        ty::TyNever => Some(NeverSimplifiedType),
-        ty::TyTuple(ref tys) => {
-            Some(TupleSimplifiedType(tys.len()))
-        }
-        ty::TyFnPtr(ref f) => {
-            Some(FunctionSimplifiedType(f.skip_binder().inputs().len()))
-        }
-        ty::TyProjection(_) | ty::TyParam(_) => {
+        ty::Never => Some(NeverSimplifiedType),
+        ty::Tuple(ref tys) => Some(TupleSimplifiedType(tys.len())),
+        ty::FnPtr(ref f) => Some(FunctionSimplifiedType(f.skip_binder().inputs().len())),
+        ty::UnnormalizedProjection(..) => bug!("only used with chalk-engine"),
+        ty::Projection(_) | ty::Param(_) => {
             if can_simplify_params {
                 // In normalized types, projections don't unify with
                 // anything. when lazy normalization happens, this
                 // will change. It would still be nice to have a way
                 // to deal with known-not-to-unify-with-anything
-                // projections (e.g. the likes of <__S as Encoder>::Error).
+                // projections (e.g., the likes of <__S as Encoder>::Error).
                 Some(ParameterSimplifiedType)
             } else {
                 None
             }
         }
-        ty::TyAnon(def_id, _) => {
-            Some(AnonSimplifiedType(def_id))
-        }
-        ty::TyForeign(def_id) => {
-            Some(ForeignSimplifiedType(def_id))
-        }
-        ty::TyInfer(_) | ty::TyError => None,
+        ty::Opaque(def_id, _) => Some(OpaqueSimplifiedType(def_id)),
+        ty::Foreign(def_id) => Some(ForeignSimplifiedType(def_id)),
+        ty::Placeholder(..) | ty::Bound(..) | ty::Infer(_) | ty::Error => None,
     }
 }
 
-impl<D: Copy + Debug + Ord + Eq + Hash> SimplifiedTypeGen<D> {
+impl<D: Copy + Debug + Ord + Eq> SimplifiedTypeGen<D> {
     pub fn map_def<U, F>(self, map: F) -> SimplifiedTypeGen<U>
-        where F: Fn(D) -> U,
-              U: Copy + Debug + Ord + Eq + Hash,
+    where
+        F: Fn(D) -> U,
+        U: Copy + Debug + Ord + Eq,
     {
         match self {
             BoolSimplifiedType => BoolSimplifiedType,
@@ -141,12 +126,13 @@ impl<D: Copy + Debug + Ord + Eq + Hash> SimplifiedTypeGen<D> {
             ArraySimplifiedType => ArraySimplifiedType,
             PtrSimplifiedType => PtrSimplifiedType,
             NeverSimplifiedType => NeverSimplifiedType,
+            MarkerTraitObjectSimplifiedType => MarkerTraitObjectSimplifiedType,
             TupleSimplifiedType(n) => TupleSimplifiedType(n),
             TraitSimplifiedType(d) => TraitSimplifiedType(map(d)),
             ClosureSimplifiedType(d) => ClosureSimplifiedType(map(d)),
             GeneratorSimplifiedType(d) => GeneratorSimplifiedType(map(d)),
             GeneratorWitnessSimplifiedType(n) => GeneratorWitnessSimplifiedType(n),
-            AnonSimplifiedType(d) => AnonSimplifiedType(map(d)),
+            OpaqueSimplifiedType(d) => OpaqueSimplifiedType(map(d)),
             FunctionSimplifiedType(n) => FunctionSimplifiedType(n),
             ParameterSimplifiedType => ParameterSimplifiedType,
             ForeignSimplifiedType(d) => ForeignSimplifiedType(d),
@@ -154,22 +140,21 @@ impl<D: Copy + Debug + Ord + Eq + Hash> SimplifiedTypeGen<D> {
     }
 }
 
-impl<'a, 'gcx, D> HashStable<StableHashingContext<'a>> for SimplifiedTypeGen<D>
-    where D: Copy + Debug + Ord + Eq + Hash +
-             HashStable<StableHashingContext<'a>>,
+impl<'a, D> HashStable<StableHashingContext<'a>> for SimplifiedTypeGen<D>
+where
+    D: Copy + Debug + Ord + Eq + HashStable<StableHashingContext<'a>>,
 {
-    fn hash_stable<W: StableHasherResult>(&self,
-                                          hcx: &mut StableHashingContext<'a>,
-                                          hasher: &mut StableHasher<W>) {
+    fn hash_stable(&self, hcx: &mut StableHashingContext<'a>, hasher: &mut StableHasher) {
         mem::discriminant(self).hash_stable(hcx, hasher);
         match *self {
-            BoolSimplifiedType |
-            CharSimplifiedType |
-            StrSimplifiedType |
-            ArraySimplifiedType |
-            PtrSimplifiedType |
-            NeverSimplifiedType |
-            ParameterSimplifiedType => {
+            BoolSimplifiedType
+            | CharSimplifiedType
+            | StrSimplifiedType
+            | ArraySimplifiedType
+            | PtrSimplifiedType
+            | NeverSimplifiedType
+            | ParameterSimplifiedType
+            | MarkerTraitObjectSimplifiedType => {
                 // nothing to do
             }
             IntSimplifiedType(t) => t.hash_stable(hcx, hasher),
@@ -181,7 +166,7 @@ impl<'a, 'gcx, D> HashStable<StableHashingContext<'a>> for SimplifiedTypeGen<D>
             ClosureSimplifiedType(d) => d.hash_stable(hcx, hasher),
             GeneratorSimplifiedType(d) => d.hash_stable(hcx, hasher),
             GeneratorWitnessSimplifiedType(n) => n.hash_stable(hcx, hasher),
-            AnonSimplifiedType(d) => d.hash_stable(hcx, hasher),
+            OpaqueSimplifiedType(d) => d.hash_stable(hcx, hasher),
             FunctionSimplifiedType(n) => n.hash_stable(hcx, hasher),
             ForeignSimplifiedType(d) => d.hash_stable(hcx, hasher),
         }

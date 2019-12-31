@@ -1,13 +1,3 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 /// Used to run some code when a value goes out of scope.
 /// This is sometimes called a 'destructor'.
 ///
@@ -21,7 +11,7 @@
 /// Refer to [the chapter on `Drop` in *The Rust Programming Language*][book]
 /// for some more elaboration.
 ///
-/// [book]: ../../book/second-edition/ch15-03-drop.html
+/// [book]: ../../book/ch15-03-drop.html
 ///
 /// # Examples
 ///
@@ -109,9 +99,15 @@ pub trait Drop {
     /// Given that a [`panic!`] will call `drop` as it unwinds, any [`panic!`]
     /// in a `drop` implementation will likely abort.
     ///
+    /// Note that even if this panics, the value is considered to be dropped;
+    /// you must not cause `drop` to be called again. This is normally automatically
+    /// handled by the compiler, but when using unsafe code, can sometimes occur
+    /// unintentionally, particularly when using [`std::ptr::drop_in_place`].
+    ///
     /// [E0040]: ../../error-index.html#E0040
     /// [`panic!`]: ../macro.panic.html
     /// [`std::mem::drop`]: ../../std/mem/fn.drop.html
+    /// [`std::ptr::drop_in_place`]: ../../std/ptr/fn.drop_in_place.html
     #[stable(feature = "rust1", since = "1.0.0")]
     fn drop(&mut self);
 }

@@ -1,23 +1,14 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use syntax::symbol::InternedString;
+use crate::hir::def_id::DefId;
+use crate::ty::{self, Ty, TyVid};
+use syntax::symbol::Symbol;
 use syntax_pos::Span;
-use ty::{self, Ty};
 
-use std::cmp;
-use std::marker::PhantomData;
-use std::u32;
-use rustc_data_structures::fx::FxHashMap;
 use rustc_data_structures::snapshot_vec as sv;
 use rustc_data_structures::unify as ut;
+use std::cmp;
+use std::marker::PhantomData;
+use std::ops::Range;
+use std::u32;
 
 pub struct TypeVariableTable<'tcx> {
     values: sv::SnapshotVec<Delegate>,
@@ -27,7 +18,7 @@ pub struct TypeVariableTable<'tcx> {
     /// the known value.
     eq_relations: ut::UnificationTable<ut::InPlace<TyVidEqKey<'tcx>>>,
 
-    /// Two variables are unified in `eq_relations` when we have a
+    /// Two variables are unified in `sub_relations` when we have a
     /// constraint `?X <: ?Y` *or* a constraint `?Y <: ?X`. This second
     /// table exists only to help with the occurs check. In particular,
     /// we want to report constraints like these as an occurs check
@@ -47,32 +38,33 @@ pub struct TypeVariableTable<'tcx> {
     sub_relations: ut::UnificationTable<ut::InPlace<ty::TyVid>>,
 }
 
-/// Reasons to create a type inference variable
 #[derive(Copy, Clone, Debug)]
-pub enum TypeVariableOrigin {
-    MiscVariable(Span),
-    NormalizeProjectionType(Span),
-    TypeInference(Span),
-    TypeParameterDefinition(Span, InternedString),
-
-    /// one of the upvars or closure kind parameters in a `ClosureSubsts`
-    /// (before it has been determined)
-    ClosureSynthetic(Span),
-    SubstitutionPlaceholder(Span),
-    AutoDeref(Span),
-    AdjustmentType(Span),
-    DivergingStmt(Span),
-    DivergingBlockExpr(Span),
-    DivergingFn(Span),
-    LatticeVariable(Span),
-    Generalized(ty::TyVid),
+pub struct TypeVariableOrigin {
+    pub kind: TypeVariableOriginKind,
+    pub span: Span,
 }
 
-pub type TypeVariableMap = FxHashMap<ty::TyVid, TypeVariableOrigin>;
+/// Reasons to create a type inference variable
+#[derive(Copy, Clone, Debug)]
+pub enum TypeVariableOriginKind {
+    MiscVariable,
+    NormalizeProjectionType,
+    TypeInference,
+    TypeParameterDefinition(Symbol, Option<DefId>),
+
+    /// One of the upvars or closure kind parameters in a `ClosureSubsts`
+    /// (before it has been determined).
+    ClosureSynthetic,
+    SubstitutionPlaceholder,
+    AutoDeref,
+    AdjustmentType,
+    DivergingFn,
+    LatticeVariable,
+}
 
 struct TypeVariableData {
     origin: TypeVariableOrigin,
-    diverging: bool
+    diverging: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -124,7 +116,7 @@ impl<'tcx> TypeVariableTable<'tcx> {
     ///
     /// Note that this function does not return care whether
     /// `vid` has been unified with something else or not.
-    pub fn var_diverges<'a>(&'a self, vid: ty::TyVid) -> bool {
+    pub fn var_diverges(&self, vid: ty::TyVid) -> bool {
         self.values.get(vid.index as usize).diverging
     }
 
@@ -161,44 +153,49 @@ impl<'tcx> TypeVariableTable<'tcx> {
     pub fn instantiate(&mut self, vid: ty::TyVid, ty: Ty<'tcx>) {
         let vid = self.root_var(vid);
         debug_assert!(self.probe(vid).is_unknown());
-        debug_assert!(self.eq_relations.probe_value(vid).is_unknown(),
-                      "instantiating type variable `{:?}` twice: new-value = {:?}, old-value={:?}",
-                      vid, ty, self.eq_relations.probe_value(vid));
+        debug_assert!(
+            self.eq_relations.probe_value(vid).is_unknown(),
+            "instantiating type variable `{:?}` twice: new-value = {:?}, old-value={:?}",
+            vid,
+            ty,
+            self.eq_relations.probe_value(vid)
+        );
         self.eq_relations.union_value(vid, TypeVariableValue::Known { value: ty });
 
         // Hack: we only need this so that `types_escaping_snapshot`
         // can see what has been unified; see the Delegate impl for
         // more details.
-        self.values.record(Instantiate { vid: vid });
+        self.values.record(Instantiate { vid });
     }
 
     /// Creates a new type variable.
     ///
     /// - `diverging`: indicates if this is a "diverging" type
-    ///   variable, e.g.  one created as the type of a `return`
+    ///   variable, e.g.,  one created as the type of a `return`
     ///   expression. The code in this module doesn't care if a
     ///   variable is diverging, but the main Rust type-checker will
     ///   sometimes "unify" such variables with the `!` or `()` types.
     /// - `origin`: indicates *why* the type variable was created.
     ///   The code in this module doesn't care, but it can be useful
     ///   for improving error messages.
-    pub fn new_var(&mut self,
-                   universe: ty::UniverseIndex,
-                   diverging: bool,
-                   origin: TypeVariableOrigin)
-                   -> ty::TyVid {
+    pub fn new_var(
+        &mut self,
+        universe: ty::UniverseIndex,
+        diverging: bool,
+        origin: TypeVariableOrigin,
+    ) -> ty::TyVid {
         let eq_key = self.eq_relations.new_key(TypeVariableValue::Unknown { universe });
 
         let sub_key = self.sub_relations.new_key(());
         assert_eq!(eq_key.vid, sub_key);
 
-        let index = self.values.push(TypeVariableData {
-            origin,
-            diverging,
-        });
+        let index = self.values.push(TypeVariableData { origin, diverging });
         assert_eq!(eq_key.vid.index, index as u32);
 
-        debug!("new_var(index={:?}, diverging={:?}, origin={:?}", eq_key.vid, diverging, origin);
+        debug!(
+            "new_var(index={:?}, universe={:?}, diverging={:?}, origin={:?}",
+            eq_key.vid, universe, diverging, origin,
+        );
 
         eq_key.vid
     }
@@ -228,7 +225,7 @@ impl<'tcx> TypeVariableTable<'tcx> {
         self.sub_relations.find(vid)
     }
 
-    /// True if `a` and `b` have same "sub-root" (i.e., exists some
+    /// Returns `true` if `a` and `b` have same "sub-root" (i.e., exists some
     /// type X such that `forall i in {a, b}. (i <: X || X <: i)`.
     pub fn sub_unified(&mut self, a: ty::TyVid, b: ty::TyVid) -> bool {
         self.sub_root_var(a) == self.sub_root_var(b)
@@ -237,27 +234,31 @@ impl<'tcx> TypeVariableTable<'tcx> {
     /// Retrieves the type to which `vid` has been instantiated, if
     /// any.
     pub fn probe(&mut self, vid: ty::TyVid) -> TypeVariableValue<'tcx> {
-        self.eq_relations.probe_value(vid)
+        self.inlined_probe(vid)
+    }
+
+    /// An always-inlined variant of `probe`, for very hot call sites.
+    #[inline(always)]
+    pub fn inlined_probe(&mut self, vid: ty::TyVid) -> TypeVariableValue<'tcx> {
+        self.eq_relations.inlined_probe_value(vid)
     }
 
     /// If `t` is a type-inference variable, and it has been
     /// instantiated, then return the with which it was
     /// instantiated. Otherwise, returns `t`.
     pub fn replace_if_possible(&mut self, t: Ty<'tcx>) -> Ty<'tcx> {
-        match t.sty {
-            ty::TyInfer(ty::TyVar(v)) => {
-                match self.probe(v) {
-                    TypeVariableValue::Unknown { .. } => t,
-                    TypeVariableValue::Known { value } => value,
-                }
-            }
+        match t.kind {
+            ty::Infer(ty::TyVar(v)) => match self.probe(v) {
+                TypeVariableValue::Unknown { .. } => t,
+                TypeVariableValue::Known { value } => value,
+            },
             _ => t,
         }
     }
 
-    /// Creates a snapshot of the type variable state.  This snapshot
+    /// Creates a snapshot of the type variable state. This snapshot
     /// must later be committed (`commit()`) or rolled back
-    /// (`rollback_to()`).  Nested snapshots are permitted, but must
+    /// (`rollback_to()`). Nested snapshots are permitted, but must
     /// be processed in a stack-like fashion.
     pub fn snapshot(&mut self) -> Snapshot<'tcx> {
         Snapshot {
@@ -273,11 +274,8 @@ impl<'tcx> TypeVariableTable<'tcx> {
     pub fn rollback_to(&mut self, s: Snapshot<'tcx>) {
         debug!("rollback_to{:?}", {
             for action in self.values.actions_since_snapshot(&s.snapshot) {
-                match *action {
-                    sv::UndoLog::NewElem(index) => {
-                        debug!("inference variable _#{}t popped", index)
-                    }
-                    _ => { }
+                if let sv::UndoLog::NewElem(index) = *action {
+                    debug!("inference variable _#{}t popped", index)
                 }
             }
         });
@@ -299,31 +297,25 @@ impl<'tcx> TypeVariableTable<'tcx> {
         self.sub_relations.commit(sub_snapshot);
     }
 
-    /// Returns a map `{V1 -> V2}`, where the keys `{V1}` are
-    /// ty-variables created during the snapshot, and the values
-    /// `{V2}` are the root variables that they were unified with,
-    /// along with their origin.
-    pub fn types_created_since_snapshot(&mut self, s: &Snapshot<'tcx>) -> TypeVariableMap {
-        let actions_since_snapshot = self.values.actions_since_snapshot(&s.snapshot);
-
-        actions_since_snapshot
-            .iter()
-            .filter_map(|action| match action {
-                &sv::UndoLog::NewElem(index) => Some(ty::TyVid { index: index as u32 }),
-                _ => None,
-            })
-            .map(|vid| {
-                let origin = self.values.get(vid.index as usize).origin.clone();
-                (vid, origin)
-            })
-            .collect()
+    /// Returns a range of the type variables created during the snapshot.
+    pub fn vars_since_snapshot(
+        &mut self,
+        s: &Snapshot<'tcx>,
+    ) -> (Range<TyVid>, Vec<TypeVariableOrigin>) {
+        let range = self.eq_relations.vars_since_snapshot(&s.eq_snapshot);
+        (
+            range.start.vid..range.end.vid,
+            (range.start.vid.index..range.end.vid.index)
+                .map(|index| self.values.get(index as usize).origin.clone())
+                .collect(),
+        )
     }
 
-    /// Find the set of type variables that existed *before* `s`
+    /// Finds the set of type variables that existed *before* `s`
     /// but which have only been unified since `s` started, and
     /// return the types with which they were unified. So if we had
     /// a type variable `V0`, then we started the snapshot, then we
-    /// created a type variable `V1`, unifed `V0` with `T0`, and
+    /// created a type variable `V1`, unified `V0` with `T0`, and
     /// unified `V1` with `T1`, this function would return `{T0}`.
     pub fn types_escaping_snapshot(&mut self, s: &Snapshot<'tcx>) -> Vec<Ty<'tcx>> {
         let mut new_elem_threshold = u32::MAX;
@@ -355,7 +347,7 @@ impl<'tcx> TypeVariableTable<'tcx> {
                     debug!("SpecifyVar({:?}) new_elem_threshold={}", vid, new_elem_threshold);
                 }
 
-                _ => { }
+                _ => {}
             }
         }
 
@@ -383,7 +375,7 @@ impl sv::SnapshotVecDelegate for Delegate {
 
     fn reverse(_values: &mut Vec<TypeVariableData>, _action: Instantiate) {
         // We don't actually have to *do* anything to reverse an
-        // instanation; the value for a variable is stored in the
+        // instantiation; the value for a variable is stored in the
         // `eq_relations` and hence its rollback code will handle
         // it. In fact, we could *almost* just remove the
         // `SnapshotVec` entirely, except that we would have to
@@ -418,9 +410,15 @@ impl<'tcx> From<ty::TyVid> for TyVidEqKey<'tcx> {
 
 impl<'tcx> ut::UnifyKey for TyVidEqKey<'tcx> {
     type Value = TypeVariableValue<'tcx>;
-    fn index(&self) -> u32 { self.vid.index }
-    fn from_index(i: u32) -> Self { TyVidEqKey::from(ty::TyVid { index: i }) }
-    fn tag() -> &'static str { "TyVidEqKey" }
+    fn index(&self) -> u32 {
+        self.vid.index
+    }
+    fn from_index(i: u32) -> Self {
+        TyVidEqKey::from(ty::TyVid { index: i })
+    }
+    fn tag() -> &'static str {
+        "TyVidEqKey"
+    }
 }
 
 impl<'tcx> ut::UnifyValue for TypeVariableValue<'tcx> {
@@ -440,8 +438,10 @@ impl<'tcx> ut::UnifyValue for TypeVariableValue<'tcx> {
             (&TypeVariableValue::Unknown { .. }, &TypeVariableValue::Known { .. }) => Ok(*value2),
 
             // If both sides are *unknown*, it hardly matters, does it?
-            (&TypeVariableValue::Unknown { universe: universe1 },
-             &TypeVariableValue::Unknown { universe: universe2 }) =>  {
+            (
+                &TypeVariableValue::Unknown { universe: universe1 },
+                &TypeVariableValue::Unknown { universe: universe2 },
+            ) => {
                 // If we unify two unbound variables, ?T and ?U, then whatever
                 // value they wind up taking (which must be the same value) must
                 // be nameable by both universes. Therefore, the resulting
@@ -458,8 +458,13 @@ impl<'tcx> ut::UnifyValue for TypeVariableValue<'tcx> {
 /// they carry no values.
 impl ut::UnifyKey for ty::TyVid {
     type Value = ();
-    fn index(&self) -> u32 { self.index }
-    fn from_index(i: u32) -> ty::TyVid { ty::TyVid { index: i } }
-    fn tag() -> &'static str { "TyVid" }
+    fn index(&self) -> u32 {
+        self.index
+    }
+    fn from_index(i: u32) -> ty::TyVid {
+        ty::TyVid { index: i }
+    }
+    fn tag() -> &'static str {
+        "TyVid"
+    }
 }
-

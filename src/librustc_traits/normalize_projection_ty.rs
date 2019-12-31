@@ -1,50 +1,28 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use rustc::infer::canonical::{Canonical, QueryResult};
+use rustc::hir;
+use rustc::infer::canonical::{Canonical, QueryResponse};
 use rustc::traits::query::{normalize::NormalizationResult, CanonicalProjectionGoal, NoSolution};
 use rustc::traits::{self, ObligationCause, SelectionContext, TraitEngineExt};
 use rustc::ty::query::Providers;
 use rustc::ty::{ParamEnvAnd, TyCtxt};
-use rustc_data_structures::sync::Lrc;
 use std::sync::atomic::Ordering;
-use syntax::ast::DUMMY_NODE_ID;
 use syntax_pos::DUMMY_SP;
 
-crate fn provide(p: &mut Providers) {
-    *p = Providers {
-        normalize_projection_ty,
-        ..*p
-    };
+crate fn provide(p: &mut Providers<'_>) {
+    *p = Providers { normalize_projection_ty, ..*p };
 }
 
 fn normalize_projection_ty<'tcx>(
-    tcx: TyCtxt<'_, 'tcx, 'tcx>,
+    tcx: TyCtxt<'tcx>,
     goal: CanonicalProjectionGoal<'tcx>,
-) -> Result<Lrc<Canonical<'tcx, QueryResult<'tcx, NormalizationResult<'tcx>>>>, NoSolution> {
+) -> Result<&'tcx Canonical<'tcx, QueryResponse<'tcx, NormalizationResult<'tcx>>>, NoSolution> {
     debug!("normalize_provider(goal={:#?})", goal);
 
-    tcx.sess
-        .perf_stats
-        .normalize_projection_ty
-        .fetch_add(1, Ordering::Relaxed);
+    tcx.sess.perf_stats.normalize_projection_ty.fetch_add(1, Ordering::Relaxed);
     tcx.infer_ctxt().enter_canonical_trait_query(
         &goal,
-        |infcx,
-         fulfill_cx,
-         ParamEnvAnd {
-             param_env,
-             value: goal,
-         }| {
+        |infcx, fulfill_cx, ParamEnvAnd { param_env, value: goal }| {
             let selcx = &mut SelectionContext::new(infcx);
-            let cause = ObligationCause::misc(DUMMY_SP, DUMMY_NODE_ID);
+            let cause = ObligationCause::misc(DUMMY_SP, hir::DUMMY_HIR_ID);
             let mut obligations = vec![];
             let answer = traits::normalize_projection_type(
                 selcx,
@@ -55,9 +33,7 @@ fn normalize_projection_ty<'tcx>(
                 &mut obligations,
             );
             fulfill_cx.register_predicate_obligations(infcx, obligations);
-            Ok(NormalizationResult {
-                normalized_ty: answer,
-            })
+            Ok(NormalizationResult { normalized_ty: answer })
         },
     )
 }

@@ -1,16 +1,6 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // Code for creating styled buffers
 
-use snippet::{Style, StyledString};
+use crate::snippet::{Style, StyledString};
 
 #[derive(Debug)]
 pub struct StyledBuffer {
@@ -20,10 +10,7 @@ pub struct StyledBuffer {
 
 impl StyledBuffer {
     pub fn new() -> StyledBuffer {
-        StyledBuffer {
-            text: vec![],
-            styles: vec![],
-        }
+        StyledBuffer { text: vec![], styles: vec![] }
     }
 
     fn replace_tabs(&mut self) {
@@ -61,10 +48,7 @@ impl StyledBuffer {
             for (&c, &s) in row.iter().zip(row_style) {
                 if s != current_style {
                     if !current_text.is_empty() {
-                        styled_vec.push(StyledString {
-                            text: current_text,
-                            style: current_style,
-                        });
+                        styled_vec.push(StyledString { text: current_text, style: current_style });
                     }
                     current_style = s;
                     current_text = String::new();
@@ -72,10 +56,7 @@ impl StyledBuffer {
                 current_text.push(c);
             }
             if !current_text.is_empty() {
-                styled_vec.push(StyledString {
-                    text: current_text,
-                    style: current_style,
-                });
+                styled_vec.push(StyledString { text: current_text, style: current_style });
             }
 
             // We're done with the row, push and keep going
@@ -121,7 +102,7 @@ impl StyledBuffer {
 
     pub fn prepend(&mut self, line: usize, string: &str, style: Style) {
         self.ensure_lines(line);
-        let string_len = string.len();
+        let string_len = string.chars().count();
 
         // Push the old content over to make room for new content
         for _ in 0..string_len {
@@ -145,12 +126,14 @@ impl StyledBuffer {
         self.text.len()
     }
 
-    pub fn set_style_range(&mut self,
-                           line: usize,
-                           col_start: usize,
-                           col_end: usize,
-                           style: Style,
-                           overwrite: bool) {
+    pub fn set_style_range(
+        &mut self,
+        line: usize,
+        col_start: usize,
+        col_end: usize,
+        style: Style,
+        overwrite: bool,
+    ) {
         for col in col_start..col_end {
             self.set_style(line, col, style, overwrite);
         }

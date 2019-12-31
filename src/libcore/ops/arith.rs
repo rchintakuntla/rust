@@ -1,16 +1,6 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 /// The addition operator `+`.
 ///
-/// Note that `RHS` is `Self` by default, but this is not mandatory. For
+/// Note that `Rhs` is `Self` by default, but this is not mandatory. For
 /// example, [`std::time::SystemTime`] implements `Add<Duration>`, which permits
 /// operations of the form `SystemTime = SystemTime + Duration`.
 ///
@@ -30,10 +20,10 @@
 /// }
 ///
 /// impl Add for Point {
-///     type Output = Point;
+///     type Output = Self;
 ///
-///     fn add(self, other: Point) -> Point {
-///         Point {
+///     fn add(self, other: Self) -> Self {
+///         Self {
 ///             x: self.x + other.x,
 ///             y: self.y + other.y,
 ///         }
@@ -59,11 +49,11 @@
 /// }
 ///
 /// // Notice that the implementation uses the associated type `Output`.
-/// impl<T: Add<Output=T>> Add for Point<T> {
-///     type Output = Point<T>;
+/// impl<T: Add<Output = T>> Add for Point<T> {
+///     type Output = Self;
 ///
-///     fn add(self, other: Point<T>) -> Point<T> {
-///         Point {
+///     fn add(self, other: Self) -> Self::Output {
+///         Self {
 ///             x: self.x + other.x,
 ///             y: self.y + other.y,
 ///         }
@@ -76,19 +66,13 @@
 #[lang = "add"]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_on_unimplemented(
-    on(
-        all(_Self="{integer}", RHS="{float}"),
-        message="cannot add a float to an integer",
-    ),
-    on(
-        all(_Self="{float}", RHS="{integer}"),
-        message="cannot add an integer to a float",
-    ),
-    message="cannot add `{RHS}` to `{Self}`",
-    label="no implementation for `{Self} + {RHS}`",
+    on(all(_Self = "{integer}", Rhs = "{float}"), message = "cannot add a float to an integer",),
+    on(all(_Self = "{float}", Rhs = "{integer}"), message = "cannot add an integer to a float",),
+    message = "cannot add `{Rhs}` to `{Self}`",
+    label = "no implementation for `{Self} + {Rhs}`"
 )]
 #[doc(alias = "+")]
-pub trait Add<RHS=Self> {
+pub trait Add<Rhs = Self> {
     /// The resulting type after applying the `+` operator.
     #[stable(feature = "rust1", since = "1.0.0")]
     type Output;
@@ -96,7 +80,7 @@ pub trait Add<RHS=Self> {
     /// Performs the `+` operation.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    fn add(self, rhs: RHS) -> Self::Output;
+    fn add(self, rhs: Rhs) -> Self::Output;
 }
 
 macro_rules! add_impl {
@@ -118,7 +102,7 @@ add_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 
 /// The subtraction operator `-`.
 ///
-/// Note that `RHS` is `Self` by default, but this is not mandatory. For
+/// Note that `Rhs` is `Self` by default, but this is not mandatory. For
 /// example, [`std::time::SystemTime`] implements `Sub<Duration>`, which permits
 /// operations of the form `SystemTime = SystemTime - Duration`.
 ///
@@ -167,10 +151,10 @@ add_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// }
 ///
 /// // Notice that the implementation uses the associated type `Output`.
-/// impl<T: Sub<Output=T>> Sub for Point<T> {
-///     type Output = Point<T>;
+/// impl<T: Sub<Output = T>> Sub for Point<T> {
+///     type Output = Self;
 ///
-///     fn sub(self, other: Point<T>) -> Point<T> {
+///     fn sub(self, other: Self) -> Self::Output {
 ///         Point {
 ///             x: self.x - other.x,
 ///             y: self.y - other.y,
@@ -183,10 +167,12 @@ add_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "sub"]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_on_unimplemented(message="cannot subtract `{RHS}` from `{Self}`",
-                         label="no implementation for `{Self} - {RHS}`")]
+#[rustc_on_unimplemented(
+    message = "cannot subtract `{Rhs}` from `{Self}`",
+    label = "no implementation for `{Self} - {Rhs}`"
+)]
 #[doc(alias = "-")]
-pub trait Sub<RHS=Self> {
+pub trait Sub<Rhs = Self> {
     /// The resulting type after applying the `-` operator.
     #[stable(feature = "rust1", since = "1.0.0")]
     type Output;
@@ -194,7 +180,7 @@ pub trait Sub<RHS=Self> {
     /// Performs the `-` operation.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    fn sub(self, rhs: RHS) -> Self::Output;
+    fn sub(self, rhs: Rhs) -> Self::Output;
 }
 
 macro_rules! sub_impl {
@@ -216,7 +202,7 @@ sub_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 
 /// The multiplication operator `*`.
 ///
-/// Note that `RHS` is `Self` by default, but this is not mandatory.
+/// Note that `Rhs` is `Self` by default, but this is not mandatory.
 ///
 /// # Examples
 ///
@@ -230,21 +216,21 @@ sub_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// // derive `Eq` and `PartialEq`.
 /// #[derive(Debug, Eq, PartialEq)]
 /// struct Rational {
-///     nominator: usize,
+///     numerator: usize,
 ///     denominator: usize,
 /// }
 ///
 /// impl Rational {
-///     fn new(nominator: usize, denominator: usize) -> Self {
+///     fn new(numerator: usize, denominator: usize) -> Self {
 ///         if denominator == 0 {
 ///             panic!("Zero is an invalid denominator!");
 ///         }
 ///
 ///         // Reduce to lowest terms by dividing by the greatest common
 ///         // divisor.
-///         let gcd = gcd(nominator, denominator);
+///         let gcd = gcd(numerator, denominator);
 ///         Rational {
-///             nominator: nominator / gcd,
+///             numerator: numerator / gcd,
 ///             denominator: denominator / gcd,
 ///         }
 ///     }
@@ -255,9 +241,9 @@ sub_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 ///     type Output = Self;
 ///
 ///     fn mul(self, rhs: Self) -> Self {
-///         let nominator = self.nominator * rhs.nominator;
+///         let numerator = self.numerator * rhs.numerator;
 ///         let denominator = self.denominator * rhs.denominator;
-///         Rational::new(nominator, denominator)
+///         Rational::new(numerator, denominator)
 ///     }
 /// }
 ///
@@ -290,9 +276,9 @@ sub_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// struct Vector { value: Vec<usize> }
 ///
 /// impl Mul<Scalar> for Vector {
-///     type Output = Vector;
+///     type Output = Self;
 ///
-///     fn mul(self, rhs: Scalar) -> Vector {
+///     fn mul(self, rhs: Scalar) -> Self::Output {
 ///         Vector { value: self.value.iter().map(|v| v * rhs.value).collect() }
 ///     }
 /// }
@@ -303,10 +289,12 @@ sub_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "mul"]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_on_unimplemented(message="cannot multiply `{RHS}` to `{Self}`",
-                         label="no implementation for `{Self} * {RHS}`")]
+#[rustc_on_unimplemented(
+    message = "cannot multiply `{Rhs}` to `{Self}`",
+    label = "no implementation for `{Self} * {Rhs}`"
+)]
 #[doc(alias = "*")]
-pub trait Mul<RHS=Self> {
+pub trait Mul<Rhs = Self> {
     /// The resulting type after applying the `*` operator.
     #[stable(feature = "rust1", since = "1.0.0")]
     type Output;
@@ -314,7 +302,7 @@ pub trait Mul<RHS=Self> {
     /// Performs the `*` operation.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    fn mul(self, rhs: RHS) -> Self::Output;
+    fn mul(self, rhs: Rhs) -> Self::Output;
 }
 
 macro_rules! mul_impl {
@@ -336,7 +324,7 @@ mul_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 
 /// The division operator `/`.
 ///
-/// Note that `RHS` is `Self` by default, but this is not mandatory.
+/// Note that `Rhs` is `Self` by default, but this is not mandatory.
 ///
 /// # Examples
 ///
@@ -350,21 +338,21 @@ mul_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// // derive `Eq` and `PartialEq`.
 /// #[derive(Debug, Eq, PartialEq)]
 /// struct Rational {
-///     nominator: usize,
+///     numerator: usize,
 ///     denominator: usize,
 /// }
 ///
 /// impl Rational {
-///     fn new(nominator: usize, denominator: usize) -> Self {
+///     fn new(numerator: usize, denominator: usize) -> Self {
 ///         if denominator == 0 {
 ///             panic!("Zero is an invalid denominator!");
 ///         }
 ///
 ///         // Reduce to lowest terms by dividing by the greatest common
 ///         // divisor.
-///         let gcd = gcd(nominator, denominator);
+///         let gcd = gcd(numerator, denominator);
 ///         Rational {
-///             nominator: nominator / gcd,
+///             numerator: numerator / gcd,
 ///             denominator: denominator / gcd,
 ///         }
 ///     }
@@ -374,14 +362,14 @@ mul_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 ///     // The division of rational numbers is a closed operation.
 ///     type Output = Self;
 ///
-///     fn div(self, rhs: Self) -> Self {
-///         if rhs.nominator == 0 {
+///     fn div(self, rhs: Self) -> Self::Output {
+///         if rhs.numerator == 0 {
 ///             panic!("Cannot divide by zero-valued `Rational`!");
 ///         }
 ///
-///         let nominator = self.nominator * rhs.denominator;
-///         let denominator = self.denominator * rhs.nominator;
-///         Rational::new(nominator, denominator)
+///         let numerator = self.numerator * rhs.denominator;
+///         let denominator = self.denominator * rhs.numerator;
+///         Rational::new(numerator, denominator)
 ///     }
 /// }
 ///
@@ -414,9 +402,9 @@ mul_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// struct Vector { value: Vec<f32> }
 ///
 /// impl Div<Scalar> for Vector {
-///     type Output = Vector;
+///     type Output = Self;
 ///
-///     fn div(self, rhs: Scalar) -> Vector {
+///     fn div(self, rhs: Scalar) -> Self::Output {
 ///         Vector { value: self.value.iter().map(|v| v / rhs.value).collect() }
 ///     }
 /// }
@@ -427,10 +415,12 @@ mul_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "div"]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_on_unimplemented(message="cannot divide `{Self}` by `{RHS}`",
-                         label="no implementation for `{Self} / {RHS}`")]
+#[rustc_on_unimplemented(
+    message = "cannot divide `{Self}` by `{Rhs}`",
+    label = "no implementation for `{Self} / {Rhs}`"
+)]
 #[doc(alias = "/")]
-pub trait Div<RHS=Self> {
+pub trait Div<Rhs = Self> {
     /// The resulting type after applying the `/` operator.
     #[stable(feature = "rust1", since = "1.0.0")]
     type Output;
@@ -438,7 +428,7 @@ pub trait Div<RHS=Self> {
     /// Performs the `/` operation.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    fn div(self, rhs: RHS) -> Self::Output;
+    fn div(self, rhs: Rhs) -> Self::Output;
 }
 
 macro_rules! div_impl_integer {
@@ -477,7 +467,7 @@ div_impl_float! { f32 f64 }
 
 /// The remainder operator `%`.
 ///
-/// Note that `RHS` is `Self` by default, but this is not mandatory.
+/// Note that `Rhs` is `Self` by default, but this is not mandatory.
 ///
 /// # Examples
 ///
@@ -495,9 +485,9 @@ div_impl_float! { f32 f64 }
 /// }
 ///
 /// impl<'a, T> Rem<usize> for SplitSlice<'a, T> {
-///     type Output = SplitSlice<'a, T>;
+///     type Output = Self;
 ///
-///     fn rem(self, modulus: usize) -> Self {
+///     fn rem(self, modulus: usize) -> Self::Output {
 ///         let len = self.slice.len();
 ///         let rem = len % modulus;
 ///         let start = len - rem;
@@ -512,23 +502,25 @@ div_impl_float! { f32 f64 }
 /// ```
 #[lang = "rem"]
 #[stable(feature = "rust1", since = "1.0.0")]
-#[rustc_on_unimplemented(message="cannot mod `{Self}` by `{RHS}`",
-                         label="no implementation for `{Self} % {RHS}`")]
+#[rustc_on_unimplemented(
+    message = "cannot mod `{Self}` by `{Rhs}`",
+    label = "no implementation for `{Self} % {Rhs}`"
+)]
 #[doc(alias = "%")]
-pub trait Rem<RHS=Self> {
+pub trait Rem<Rhs = Self> {
     /// The resulting type after applying the `%` operator.
     #[stable(feature = "rust1", since = "1.0.0")]
-    type Output = Self;
+    type Output;
 
     /// Performs the `%` operation.
     #[must_use]
     #[stable(feature = "rust1", since = "1.0.0")]
-    fn rem(self, rhs: RHS) -> Self::Output;
+    fn rem(self, rhs: Rhs) -> Self::Output;
 }
 
 macro_rules! rem_impl_integer {
     ($($t:ty)*) => ($(
-        /// This operation satisfies `n % d == n - (n / d) * d`.  The
+        /// This operation satisfies `n % d == n - (n / d) * d`. The
         /// result has the same sign as the left operand.
         #[stable(feature = "rust1", since = "1.0.0")]
         impl Rem for $t {
@@ -544,9 +536,23 @@ macro_rules! rem_impl_integer {
 
 rem_impl_integer! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 }
 
-
 macro_rules! rem_impl_float {
     ($($t:ty)*) => ($(
+
+        /// The remainder from the division of two floats.
+        ///
+        /// The remainder has the same sign as the dividend and is computed as:
+        /// `x - (x / y).trunc() * y`.
+        ///
+        /// # Examples
+        /// ```
+        /// let x: f32 = 50.50;
+        /// let y: f32 = 8.125;
+        /// let remainder = x - (x / y).trunc() * y;
+        ///
+        /// // The answer to both operations is 1.75
+        /// assert_eq!(x % y, remainder);
+        /// ```
         #[stable(feature = "rust1", since = "1.0.0")]
         impl Rem for $t {
             type Output = $t;
@@ -581,7 +587,7 @@ rem_impl_float! { f32 f64 }
 /// impl Neg for Sign {
 ///     type Output = Sign;
 ///
-///     fn neg(self) -> Sign {
+///     fn neg(self) -> Self::Output {
 ///         match self {
 ///             Sign::Negative => Sign::Positive,
 ///             Sign::Zero => Sign::Zero,
@@ -610,8 +616,6 @@ pub trait Neg {
     #[stable(feature = "rust1", since = "1.0.0")]
     fn neg(self) -> Self::Output;
 }
-
-
 
 macro_rules! neg_impl_core {
     ($id:ident => $body:expr, $($t:ty)*) => ($(
@@ -660,8 +664,8 @@ neg_impl_numeric! { isize i8 i16 i32 i64 i128 f32 f64 }
 /// }
 ///
 /// impl AddAssign for Point {
-///     fn add_assign(&mut self, other: Point) {
-///         *self = Point {
+///     fn add_assign(&mut self, other: Self) {
+///         *self = Self {
 ///             x: self.x + other.x,
 ///             y: self.y + other.y,
 ///         };
@@ -674,11 +678,13 @@ neg_impl_numeric! { isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "add_assign"]
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
-#[rustc_on_unimplemented(message="cannot add-assign `{Rhs}` to `{Self}`",
-                         label="no implementation for `{Self} += {Rhs}`")]
+#[rustc_on_unimplemented(
+    message = "cannot add-assign `{Rhs}` to `{Self}`",
+    label = "no implementation for `{Self} += {Rhs}`"
+)]
 #[doc(alias = "+")]
 #[doc(alias = "+=")]
-pub trait AddAssign<Rhs=Self> {
+pub trait AddAssign<Rhs = Self> {
     /// Performs the `+=` operation.
     #[stable(feature = "op_assign_traits", since = "1.8.0")]
     fn add_assign(&mut self, rhs: Rhs);
@@ -716,8 +722,8 @@ add_assign_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// }
 ///
 /// impl SubAssign for Point {
-///     fn sub_assign(&mut self, other: Point) {
-///         *self = Point {
+///     fn sub_assign(&mut self, other: Self) {
+///         *self = Self {
 ///             x: self.x - other.x,
 ///             y: self.y - other.y,
 ///         };
@@ -730,11 +736,13 @@ add_assign_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "sub_assign"]
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
-#[rustc_on_unimplemented(message="cannot subtract-assign `{Rhs}` from `{Self}`",
-                         label="no implementation for `{Self} -= {Rhs}`")]
+#[rustc_on_unimplemented(
+    message = "cannot subtract-assign `{Rhs}` from `{Self}`",
+    label = "no implementation for `{Self} -= {Rhs}`"
+)]
 #[doc(alias = "-")]
 #[doc(alias = "-=")]
-pub trait SubAssign<Rhs=Self> {
+pub trait SubAssign<Rhs = Self> {
     /// Performs the `-=` operation.
     #[stable(feature = "op_assign_traits", since = "1.8.0")]
     fn sub_assign(&mut self, rhs: Rhs);
@@ -777,11 +785,13 @@ sub_assign_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "mul_assign"]
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
-#[rustc_on_unimplemented(message="cannot multiply-assign `{Rhs}` to `{Self}`",
-                         label="no implementation for `{Self} *= {Rhs}`")]
+#[rustc_on_unimplemented(
+    message = "cannot multiply-assign `{Rhs}` to `{Self}`",
+    label = "no implementation for `{Self} *= {Rhs}`"
+)]
 #[doc(alias = "*")]
 #[doc(alias = "*=")]
-pub trait MulAssign<Rhs=Self> {
+pub trait MulAssign<Rhs = Self> {
     /// Performs the `*=` operation.
     #[stable(feature = "op_assign_traits", since = "1.8.0")]
     fn mul_assign(&mut self, rhs: Rhs);
@@ -824,11 +834,13 @@ mul_assign_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "div_assign"]
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
-#[rustc_on_unimplemented(message="cannot divide-assign `{Self}` by `{Rhs}`",
-                         label="no implementation for `{Self} /= {Rhs}`")]
+#[rustc_on_unimplemented(
+    message = "cannot divide-assign `{Self}` by `{Rhs}`",
+    label = "no implementation for `{Self} /= {Rhs}`"
+)]
 #[doc(alias = "/")]
 #[doc(alias = "/=")]
-pub trait DivAssign<Rhs=Self> {
+pub trait DivAssign<Rhs = Self> {
     /// Performs the `/=` operation.
     #[stable(feature = "op_assign_traits", since = "1.8.0")]
     fn div_assign(&mut self, rhs: Rhs);
@@ -874,11 +886,13 @@ div_assign_impl! { usize u8 u16 u32 u64 u128 isize i8 i16 i32 i64 i128 f32 f64 }
 /// ```
 #[lang = "rem_assign"]
 #[stable(feature = "op_assign_traits", since = "1.8.0")]
-#[rustc_on_unimplemented(message="cannot mod-assign `{Self}` by `{Rhs}``",
-                         label="no implementation for `{Self} %= {Rhs}`")]
+#[rustc_on_unimplemented(
+    message = "cannot mod-assign `{Self}` by `{Rhs}``",
+    label = "no implementation for `{Self} %= {Rhs}`"
+)]
 #[doc(alias = "%")]
 #[doc(alias = "%=")]
-pub trait RemAssign<Rhs=Self> {
+pub trait RemAssign<Rhs = Self> {
     /// Performs the `%=` operation.
     #[stable(feature = "op_assign_traits", since = "1.8.0")]
     fn rem_assign(&mut self, rhs: Rhs);

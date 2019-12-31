@@ -1,37 +1,26 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Defines the set of legal keys that can be used in queries.
 
-use infer::canonical::Canonical;
-use hir::def_id::{CrateNum, DefId, LOCAL_CRATE, DefIndex};
-use ty::{self, Ty, TyCtxt};
-use ty::subst::Substs;
-use ty::fast_reject::SimplifiedType;
-use mir;
+use crate::hir::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE};
+use crate::infer::canonical::Canonical;
+use crate::mir;
+use crate::traits;
+use crate::ty::fast_reject::SimplifiedType;
+use crate::ty::subst::SubstsRef;
+use crate::ty::{self, Ty, TyCtxt};
 
-use std::fmt::Debug;
-use std::hash::Hash;
+use syntax_pos::symbol::Symbol;
 use syntax_pos::{Span, DUMMY_SP};
-use syntax_pos::symbol::InternedString;
 
 /// The `Key` trait controls what types can legally be used as the key
 /// for a query.
-pub(super) trait Key: Clone + Hash + Eq + Debug {
+pub(super) trait Key {
     /// Given an instance of this key, what crate is it referring to?
     /// This is used to find the provider.
     fn query_crate(&self) -> CrateNum;
 
     /// In the event that a cycle occurs, if no explicit span has been
     /// given for a query with key `self`, what span should we use?
-    fn default_span(&self, tcx: TyCtxt) -> Span;
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span;
 }
 
 impl<'tcx> Key for ty::InstanceDef<'tcx> {
@@ -39,7 +28,7 @@ impl<'tcx> Key for ty::InstanceDef<'tcx> {
         LOCAL_CRATE
     }
 
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         tcx.def_span(self.def_id())
     }
 }
@@ -49,7 +38,7 @@ impl<'tcx> Key for ty::Instance<'tcx> {
         LOCAL_CRATE
     }
 
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         tcx.def_span(self.def_id())
     }
 }
@@ -59,7 +48,7 @@ impl<'tcx> Key for mir::interpret::GlobalId<'tcx> {
         self.instance.query_crate()
     }
 
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.instance.default_span(tcx)
     }
 }
@@ -68,7 +57,7 @@ impl Key for CrateNum {
     fn query_crate(&self) -> CrateNum {
         *self
     }
-    fn default_span(&self, _: TyCtxt) -> Span {
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
@@ -77,7 +66,7 @@ impl Key for DefIndex {
     fn query_crate(&self) -> CrateNum {
         LOCAL_CRATE
     }
-    fn default_span(&self, _tcx: TyCtxt) -> Span {
+    fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
@@ -86,7 +75,7 @@ impl Key for DefId {
     fn query_crate(&self) -> CrateNum {
         self.krate
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         tcx.def_span(*self)
     }
 }
@@ -95,7 +84,7 @@ impl Key for (DefId, DefId) {
     fn query_crate(&self) -> CrateNum {
         self.0.krate
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.1.default_span(tcx)
     }
 }
@@ -104,7 +93,7 @@ impl Key for (CrateNum, DefId) {
     fn query_crate(&self) -> CrateNum {
         self.0
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.1.default_span(tcx)
     }
 }
@@ -113,16 +102,16 @@ impl Key for (DefId, SimplifiedType) {
     fn query_crate(&self) -> CrateNum {
         self.0.krate
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.0.default_span(tcx)
     }
 }
 
-impl<'tcx> Key for (DefId, &'tcx Substs<'tcx>) {
+impl<'tcx> Key for (DefId, SubstsRef<'tcx>) {
     fn query_crate(&self) -> CrateNum {
         self.0.krate
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.0.default_span(tcx)
     }
 }
@@ -131,25 +120,34 @@ impl<'tcx> Key for (ty::ParamEnv<'tcx>, ty::PolyTraitRef<'tcx>) {
     fn query_crate(&self) -> CrateNum {
         self.1.def_id().krate
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         tcx.def_span(self.1.def_id())
     }
 }
 
-impl<'tcx> Key for ty::PolyTraitRef<'tcx>{
+impl<'tcx> Key for (&'tcx ty::Const<'tcx>, mir::Field) {
+    fn query_crate(&self) -> CrateNum {
+        LOCAL_CRATE
+    }
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
+        DUMMY_SP
+    }
+}
+
+impl<'tcx> Key for ty::PolyTraitRef<'tcx> {
     fn query_crate(&self) -> CrateNum {
         self.def_id().krate
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         tcx.def_span(self.def_id())
     }
 }
 
-impl<'tcx> Key for &'tcx ty::Const<'tcx> {
+impl<'tcx> Key for ty::Const<'tcx> {
     fn query_crate(&self) -> CrateNum {
         LOCAL_CRATE
     }
-    fn default_span(&self, _: TyCtxt) -> Span {
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
@@ -158,7 +156,7 @@ impl<'tcx> Key for Ty<'tcx> {
     fn query_crate(&self) -> CrateNum {
         LOCAL_CRATE
     }
-    fn default_span(&self, _: TyCtxt) -> Span {
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
@@ -167,7 +165,7 @@ impl<'tcx> Key for ty::ParamEnv<'tcx> {
     fn query_crate(&self) -> CrateNum {
         LOCAL_CRATE
     }
-    fn default_span(&self, _: TyCtxt) -> Span {
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
@@ -176,31 +174,47 @@ impl<'tcx, T: Key> Key for ty::ParamEnvAnd<'tcx, T> {
     fn query_crate(&self) -> CrateNum {
         self.value.query_crate()
     }
-    fn default_span(&self, tcx: TyCtxt) -> Span {
+    fn default_span(&self, tcx: TyCtxt<'_>) -> Span {
         self.value.default_span(tcx)
     }
 }
 
-impl Key for InternedString {
+impl<'tcx> Key for traits::Environment<'tcx> {
     fn query_crate(&self) -> CrateNum {
         LOCAL_CRATE
     }
-    fn default_span(&self, _tcx: TyCtxt) -> Span {
+    fn default_span(&self, _: TyCtxt<'_>) -> Span {
+        DUMMY_SP
+    }
+}
+
+impl Key for Symbol {
+    fn query_crate(&self) -> CrateNum {
+        LOCAL_CRATE
+    }
+    fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }
 
 /// Canonical query goals correspond to abstract trait operations that
 /// are not tied to any crate in particular.
-impl<'tcx, T> Key for Canonical<'tcx, T>
-where
-    T: Debug + Hash + Clone + Eq,
-{
+impl<'tcx, T> Key for Canonical<'tcx, T> {
     fn query_crate(&self) -> CrateNum {
         LOCAL_CRATE
     }
 
-    fn default_span(&self, _tcx: TyCtxt) -> Span {
+    fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
+        DUMMY_SP
+    }
+}
+
+impl Key for (Symbol, u32, u32) {
+    fn query_crate(&self) -> CrateNum {
+        LOCAL_CRATE
+    }
+
+    fn default_span(&self, _tcx: TyCtxt<'_>) -> Span {
         DUMMY_SP
     }
 }

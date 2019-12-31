@@ -1,17 +1,6 @@
-/**
- * Copyright 2018 The Rust Project Developers. See the COPYRIGHT
- * file at the top-level directory of this distribution and at
- * http://rust-lang.org/COPYRIGHT.
- *
- * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
- * http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
- * <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
- * option. This file may not be copied, modified, or distributed
- * except according to those terms.
- */
-
 .setting-line {
 	padding: 5px;
+	position: relative;
 }
 
 .setting-line > div {
@@ -20,6 +9,13 @@
 	vertical-align: top;
 	font-size: 17px;
 	padding-top: 2px;
+}
+
+.setting-line > .title {
+	font-size: 19px;
+	width: 100%;
+	max-width: none;
+	border-bottom: 1px solid;
 }
 
 .toggle {
@@ -70,4 +66,10 @@ input:checked + .slider:before {
 	-webkit-transform: translateX(19px);
 	-ms-transform: translateX(19px);
 	transform: translateX(19px);
+}
+
+.setting-line > .sub-settings {
+	padding-left: 42px;
+	width: 100%;
+	display: block;
 }

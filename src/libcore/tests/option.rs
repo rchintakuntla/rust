@@ -1,16 +1,8 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use core::option::*;
-use core::mem;
+use core::array::FixedSizeArray;
 use core::clone::Clone;
+use core::mem;
+use core::ops::DerefMut;
+use core::option::*;
 
 #[test]
 fn test_get_ptr() {
@@ -36,15 +28,15 @@ fn test_get_str() {
 
 #[test]
 fn test_get_resource() {
-    use std::rc::Rc;
     use core::cell::RefCell;
+    use std::rc::Rc;
 
     struct R {
-       i: Rc<RefCell<isize>>,
+        i: Rc<RefCell<isize>>,
     }
 
-        impl Drop for R {
-       fn drop(&mut self) {
+    impl Drop for R {
+        fn drop(&mut self) {
             let ii = &*self.i;
             let i = *ii.borrow();
             *ii.borrow_mut() = i + 1;
@@ -52,9 +44,7 @@ fn test_get_resource() {
     }
 
     fn r(i: Rc<RefCell<isize>>) -> R {
-        R {
-            i,
-        }
+        R { i }
     }
 
     let i = Rc::new(RefCell::new(0));
@@ -78,7 +68,8 @@ fn test_option_dance() {
     assert!(y.is_none());
 }
 
-#[test] #[should_panic]
+#[test]
+#[should_panic]
 fn test_option_too_much_dance() {
     struct A;
     let mut y = Some(A);
@@ -218,7 +209,7 @@ fn test_mut_iter() {
 fn test_ord() {
     let small = Some(1.0f64);
     let big = Some(5.0f64);
-    let nan = Some(0.0f64/0.0);
+    let nan = Some(0.0f64 / 0.0);
     assert!(!(nan < big));
     assert!(!(nan > big));
     assert!(small < big);
@@ -234,9 +225,7 @@ fn test_collect() {
     let v: Option<Vec<isize>> = (0..3).map(|x| Some(x)).collect();
     assert!(v == Some(vec![0, 1, 2]));
 
-    let v: Option<Vec<isize>> = (0..3).map(|x| {
-        if x > 1 { None } else { Some(x) }
-    }).collect();
+    let v: Option<Vec<isize>> = (0..3).map(|x| if x > 1 { None } else { Some(x) }).collect();
     assert!(v == None);
 
     // test that it does not take more elements than it needs
@@ -248,6 +237,27 @@ fn test_collect() {
     assert!(v == None);
 }
 
+#[test]
+fn test_copied() {
+    let val = 1;
+    let val_ref = &val;
+    let opt_none: Option<&'static u32> = None;
+    let opt_ref = Some(&val);
+    let opt_ref_ref = Some(&val_ref);
+
+    // None works
+    assert_eq!(opt_none.clone(), None);
+    assert_eq!(opt_none.copied(), None);
+
+    // Immutable ref works
+    assert_eq!(opt_ref.clone(), Some(&val));
+    assert_eq!(opt_ref.copied(), Some(1));
+
+    // Double Immutable ref works
+    assert_eq!(opt_ref_ref.clone(), Some(&val_ref));
+    assert_eq!(opt_ref_ref.clone().copied(), Some(&val));
+    assert_eq!(opt_ref_ref.copied().copied(), Some(1));
+}
 
 #[test]
 fn test_cloned() {
@@ -299,20 +309,38 @@ fn test_try() {
 }
 
 #[test]
-fn test_option_deref() {
+fn test_option_as_deref() {
     // Some: &Option<T: Deref>::Some(T) -> Option<&T::Deref::Target>::Some(&*T)
     let ref_option = &Some(&42);
-    assert_eq!(ref_option.deref(), Some(&42));
+    assert_eq!(ref_option.as_deref(), Some(&42));
 
     let ref_option = &Some(String::from("a result"));
-    assert_eq!(ref_option.deref(), Some("a result"));
+    assert_eq!(ref_option.as_deref(), Some("a result"));
 
     let ref_option = &Some(vec![1, 2, 3, 4, 5]);
-    assert_eq!(ref_option.deref(), Some(&[1, 2, 3, 4, 5][..]));
+    assert_eq!(ref_option.as_deref(), Some([1, 2, 3, 4, 5].as_slice()));
 
     // None: &Option<T: Deref>>::None -> None
     let ref_option: &Option<&i32> = &None;
-    assert_eq!(ref_option.deref(), None);
+    assert_eq!(ref_option.as_deref(), None);
+}
+
+#[test]
+fn test_option_as_deref_mut() {
+    // Some: &mut Option<T: Deref>::Some(T) -> Option<&mut T::Deref::Target>::Some(&mut *T)
+    let mut val = 42;
+    let ref_option = &mut Some(&mut val);
+    assert_eq!(ref_option.as_deref_mut(), Some(&mut 42));
+
+    let ref_option = &mut Some(String::from("a result"));
+    assert_eq!(ref_option.as_deref_mut(), Some(String::from("a result").deref_mut()));
+
+    let ref_option = &mut Some(vec![1, 2, 3, 4, 5]);
+    assert_eq!(ref_option.as_deref_mut(), Some([1, 2, 3, 4, 5].as_mut_slice()));
+
+    // None: &mut Option<T: Deref>>::None -> None
+    let ref_option: &mut Option<&mut i32> = &mut None;
+    assert_eq!(ref_option.as_deref_mut(), None);
 }
 
 #[test]

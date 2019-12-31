@@ -1,37 +1,23 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![feature(allocator_api)]
-#![feature(alloc_system)]
-#![feature(attr_literals)]
 #![feature(box_syntax)]
-#![feature(const_fn)]
 #![feature(drain_filter)]
 #![feature(exact_size_is_empty)]
+#![feature(map_first_last)]
+#![feature(new_uninit)]
 #![feature(pattern)]
-#![feature(slice_sort_by_cached_key)]
-#![feature(str_escape)]
+#![feature(trusted_len)]
 #![feature(try_reserve)]
 #![feature(unboxed_closures)]
-#![feature(exact_chunks)]
-#![feature(repeat_generic_slice)]
+#![feature(associated_type_bounds)]
+#![feature(binary_heap_into_iter_sorted)]
+#![feature(binary_heap_drain_sorted)]
 
-extern crate alloc_system;
-extern crate core;
-extern crate rand;
-
-use std::hash::{Hash, Hasher};
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 mod arc;
 mod binary_heap;
+mod boxed;
 mod btree;
 mod cow_str;
 mod fmt;
@@ -41,8 +27,8 @@ mod rc;
 mod slice;
 mod str;
 mod string;
-mod vec_deque;
 mod vec;
+mod vec_deque;
 
 fn hash<T: Hash>(t: &T) -> u64 {
     let mut s = DefaultHasher::new();

@@ -1,14 +1,4 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use spec::{LinkerFlavor, Target, TargetResult};
+use crate::spec::{LinkerFlavor, Target, TargetResult};
 
 pub fn target() -> TargetResult {
     let mut base = super::windows_base::opts();
@@ -19,7 +9,9 @@ pub fn target() -> TargetResult {
     // Mark all dynamic libraries and executables as compatible with the larger 4GiB address
     // space available to x86 Windows binaries on x86_64.
     base.pre_link_args
-        .get_mut(&LinkerFlavor::Gcc).unwrap().push("-Wl,--large-address-aware".to_string());
+        .get_mut(&LinkerFlavor::Gcc)
+        .unwrap()
+        .push("-Wl,--large-address-aware".to_string());
 
     Ok(Target {
         llvm_target: "i686-pc-windows-gnu".to_string(),

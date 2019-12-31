@@ -1,19 +1,9 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+use crate::ieee;
+use crate::{Category, ExpInt, Float, FloatConvert, ParseError, Round, Status, StatusAnd};
 
-use {Category, ExpInt, Float, FloatConvert, Round, ParseError, Status, StatusAnd};
-use ieee;
-
-use std::cmp::Ordering;
-use std::fmt;
-use std::ops::Neg;
+use core::cmp::Ordering;
+use core::fmt;
+use core::ops::Neg;
 
 #[must_use]
 #[derive(Copy, Clone, PartialEq, PartialOrd, Debug)]
@@ -134,7 +124,7 @@ impl<F: Float> Neg for DoubleFloat<F> {
 }
 
 impl<F: FloatConvert<Fallback<F>>> fmt::Display for DoubleFloat<F> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&Fallback::from(*self), f)
     }
 }
@@ -175,10 +165,7 @@ where
     const SMALLEST: Self = DoubleFloat(F::SMALLEST, F::ZERO);
 
     fn smallest_normalized() -> Self {
-        DoubleFloat(
-            F::smallest_normalized().scalbn(F::PRECISION as ExpInt),
-            F::ZERO,
-        )
+        DoubleFloat(F::smallest_normalized().scalbn(F::PRECISION as ExpInt), F::ZERO)
     }
 
     // Implement addition, subtraction, multiplication and division based on:
@@ -195,13 +182,13 @@ where
                 }
             }
 
-            (_, Category::Zero) |
-            (Category::NaN, _) |
-            (Category::Infinity, Category::Normal) => Status::OK.and(self),
+            (_, Category::Zero) | (Category::NaN, _) | (Category::Infinity, Category::Normal) => {
+                Status::OK.and(self)
+            }
 
-            (Category::Zero, _) |
-            (_, Category::NaN) |
-            (_, Category::Infinity) => Status::OK.and(rhs),
+            (Category::Zero, _) | (_, Category::NaN) | (_, Category::Infinity) => {
+                Status::OK.and(rhs)
+            }
 
             (Category::Normal, Category::Normal) => {
                 let mut status = Status::OK;
@@ -288,7 +275,7 @@ where
         //   \   /
         //   Normal
         //
-        // e.g. NaN * NaN = NaN
+        // e.g., NaN * NaN = NaN
         //      Zero * Inf = NaN
         //      Normal * Zero = Zero
         //      Normal * Inf = Inf
@@ -297,14 +284,13 @@ where
 
             (_, Category::NaN) => Status::OK.and(rhs),
 
-            (Category::Zero, Category::Infinity) |
-            (Category::Infinity, Category::Zero) => Status::OK.and(Self::NAN),
+            (Category::Zero, Category::Infinity) | (Category::Infinity, Category::Zero) => {
+                Status::OK.and(Self::NAN)
+            }
 
-            (Category::Zero, _) |
-            (Category::Infinity, _) => Status::OK.and(self),
+            (Category::Zero, _) | (Category::Infinity, _) => Status::OK.and(self),
 
-            (_, Category::Zero) |
-            (_, Category::Infinity) => Status::OK.and(rhs),
+            (_, Category::Zero) | (_, Category::Infinity) => Status::OK.and(rhs),
 
             (Category::Normal, Category::Normal) => {
                 let mut status = Status::OK;
@@ -353,21 +339,15 @@ where
     }
 
     fn div_r(self, rhs: Self, round: Round) -> StatusAnd<Self> {
-        Fallback::from(self).div_r(Fallback::from(rhs), round).map(
-            Self::from,
-        )
+        Fallback::from(self).div_r(Fallback::from(rhs), round).map(Self::from)
     }
 
     fn c_fmod(self, rhs: Self) -> StatusAnd<Self> {
-        Fallback::from(self).c_fmod(Fallback::from(rhs)).map(
-            Self::from,
-        )
+        Fallback::from(self).c_fmod(Fallback::from(rhs)).map(Self::from)
     }
 
     fn round_to_integral(self, round: Round) -> StatusAnd<Self> {
-        Fallback::from(self).round_to_integral(round).map(
-            Self::from,
-        )
+        Fallback::from(self).round_to_integral(round).map(Self::from)
     }
 
     fn next_up(self) -> StatusAnd<Self> {
@@ -376,10 +356,7 @@ where
 
     fn from_bits(input: u128) -> Self {
         let (a, b) = (input, input >> F::BITS);
-        DoubleFloat(
-            F::from_bits(a & ((1 << F::BITS) - 1)),
-            F::from_bits(b & ((1 << F::BITS) - 1)),
-        )
+        DoubleFloat(F::from_bits(a & ((1 << F::BITS) - 1)), F::from_bits(b & ((1 << F::BITS) - 1)))
     }
 
     fn from_u128_r(input: u128, round: Round) -> StatusAnd<Self> {
@@ -404,11 +381,9 @@ where
             if result != Ordering::Equal {
                 let against = self.0.is_negative() ^ self.1.is_negative();
                 let rhs_against = rhs.0.is_negative() ^ rhs.1.is_negative();
-                (!against).cmp(&!rhs_against).then_with(|| if against {
-                    result.reverse()
-                } else {
-                    result
-                })
+                (!against)
+                    .cmp(&!rhs_against)
+                    .then_with(|| if against { result.reverse() } else { result })
             } else {
                 result
             }
@@ -424,8 +399,8 @@ where
     }
 
     fn is_denormal(self) -> bool {
-        self.category() == Category::Normal &&
-            (self.0.is_denormal() || self.0.is_denormal() ||
+        self.category() == Category::Normal
+            && (self.0.is_denormal() || self.0.is_denormal() ||
           // (double)(Hi + Lo) == Hi defines a normal number.
           !(self.0 + self.1).value.bitwise_eq(self.0))
     }

@@ -1,18 +1,7 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use boxed::FnBox;
-use env;
-use sync::atomic::{self, Ordering};
-use sys::stack_overflow;
-use sys::thread as imp;
+use crate::env;
+use crate::sync::atomic::{self, Ordering};
+use crate::sys::stack_overflow;
+use crate::sys::thread as imp;
 
 #[allow(dead_code)]
 pub unsafe fn start_thread(main: *mut u8) {
@@ -21,7 +10,7 @@ pub unsafe fn start_thread(main: *mut u8) {
     let _handler = stack_overflow::Handler::new();
 
     // Finally, let's run some code.
-    Box::from_raw(main as *mut Box<dyn FnBox()>)()
+    Box::from_raw(main as *mut Box<dyn FnOnce()>)()
 }
 
 pub fn min_stack() -> usize {

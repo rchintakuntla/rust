@@ -1,194 +1,92 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-//! Liveness analysis which computes liveness of MIR local variables at the boundary of basic blocks
+//! Liveness analysis which computes liveness of MIR local variables at the boundary of basic
+//! blocks.
 //!
 //! This analysis considers references as being used only at the point of the
 //! borrow. This means that this does not track uses because of references that
 //! already exist:
 //!
-//! ```Rust
-//!     fn foo() {
-//!         x = 0;
-//!         // `x` is live here
-//!         GLOBAL = &x: *const u32;
-//!         // but not here, even while it can be accessed through `GLOBAL`.
-//!         foo();
-//!         x = 1;
-//!         // `x` is live again here, because it is assigned to `OTHER_GLOBAL`
-//!         OTHER_GLOBAL = &x: *const u32;
-//!         // ...
-//!     }
+//! ```rust
+//! fn foo() {
+//!     x = 0;
+//!     // `x` is live here ...
+//!     GLOBAL = &x: *const u32;
+//!     // ... but not here, even while it can be accessed through `GLOBAL`.
+//!     foo();
+//!     x = 1;
+//!     // `x` is live again here, because it is assigned to `OTHER_GLOBAL`.
+//!     OTHER_GLOBAL = &x: *const u32;
+//!     // ...
+//! }
 //! ```
 //!
 //! This means that users of this analysis still have to check whether
-//! pre-existing references can be used to access the value (e.g. at movable
+//! pre-existing references can be used to access the value (e.g., at movable
 //! generator yield points, all pre-existing references are invalidated, so this
 //! doesn't matter).
 
-use rustc::mir::visit::MirVisitable;
-use rustc::mir::visit::{PlaceContext, Visitor};
+use crate::transform::MirSource;
+use crate::util::pretty::{dump_enabled, write_basic_block, write_mir_intro};
+use rustc::mir::visit::{
+    MutatingUseContext, NonMutatingUseContext, NonUseContext, PlaceContext, Visitor,
+};
 use rustc::mir::Local;
 use rustc::mir::*;
-use rustc::ty::{item_path, TyCtxt};
-use rustc_data_structures::indexed_set::IdxSetBuf;
-use rustc_data_structures::indexed_vec::{Idx, IndexVec};
+use rustc::ty::{self, TyCtxt};
 use rustc_data_structures::work_queue::WorkQueue;
+use rustc_index::bit_set::BitSet;
+use rustc_index::vec::{Idx, IndexVec};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use transform::MirSource;
-use util::pretty::{dump_enabled, write_basic_block, write_mir_intro};
 
-pub type LiveVarSet<V> = IdxSetBuf<V>;
+pub type LiveVarSet = BitSet<Local>;
 
 /// This gives the result of the liveness analysis at the boundary of
-/// basic blocks. You can use `simulate_block` to obtain the
-/// intra-block results.
+/// basic blocks.
 ///
 /// The `V` type defines the set of variables that we computed
 /// liveness for. This is often `Local`, in which case we computed
 /// liveness for all variables -- but it can also be some other type,
 /// which indicates a subset of the variables within the graph.
-pub struct LivenessResult<V: Idx> {
-    /// Liveness mode in use when these results were computed.
-    pub mode: LivenessMode,
-
+pub struct LivenessResult {
     /// Live variables on exit to each basic block. This is equal to
     /// the union of the `ins` for each successor.
-    pub outs: IndexVec<BasicBlock, LiveVarSet<V>>,
+    pub outs: IndexVec<BasicBlock, LiveVarSet>,
 }
 
-/// Defines the mapping to/from the MIR local variables (`Local`) to
-/// the "live variable indices" we are using in a particular
-/// computation.
-pub trait LiveVariableMap {
-    type LiveVar;
+/// Computes which local variables are live within the given function
+/// `mir`, including drops.
+pub fn liveness_of_locals(body: ReadOnlyBodyAndCache<'_, '_>) -> LivenessResult {
+    let num_live_vars = body.local_decls.len();
 
-    fn from_local(&self, local: Local) -> Option<Self::LiveVar>;
-    fn from_live_var(&self, local: Self::LiveVar) -> Local;
-    fn num_variables(&self) -> usize;
-}
+    let def_use: IndexVec<_, DefsUses> =
+        body.basic_blocks().iter().map(|b| block(b, num_live_vars)).collect();
 
-#[derive(Debug)]
-pub struct IdentityMap<'a, 'tcx: 'a> {
-    mir: &'a Mir<'tcx>,
-}
-
-impl<'a, 'tcx> IdentityMap<'a, 'tcx> {
-    pub fn new(mir: &'a Mir<'tcx>) -> Self {
-        Self { mir }
-    }
-}
-
-impl<'a, 'tcx> LiveVariableMap for IdentityMap<'a, 'tcx> {
-    type LiveVar = Local;
-
-    fn from_local(&self, local: Local) -> Option<Self::LiveVar> {
-        Some(local)
-    }
-
-    fn from_live_var(&self, local: Self::LiveVar) -> Local {
-        local
-    }
-
-    fn num_variables(&self) -> usize {
-        self.mir.local_decls.len()
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct LivenessMode {
-    /// If true, then we will consider "regular uses" of a variable to be live.
-    /// For example, if the user writes `foo(x)`, then this is a regular use of
-    /// the variable `x`.
-    pub include_regular_use: bool,
-
-    /// If true, then we will consider (implicit) drops of a variable
-    /// to be live.  For example, if the user writes `{ let x =
-    /// vec![...]; .. }`, then the drop at the end of the block is an
-    /// implicit drop.
-    ///
-    /// NB. Despite its name, a call like `::std::mem::drop(x)` is
-    /// **not** considered a drop for this purposes, but rather a
-    /// regular use.
-    pub include_drops: bool,
-}
-
-/// A combination of liveness results, used in NLL.
-pub struct LivenessResults<V: Idx> {
-    /// Liveness results where a regular use makes a variable X live,
-    /// but not a drop.
-    pub regular: LivenessResult<V>,
-
-    /// Liveness results where a drop makes a variable X live,
-    /// but not a regular use.
-    pub drop: LivenessResult<V>,
-}
-
-impl<V: Idx> LivenessResults<V> {
-    pub fn compute<'tcx>(
-        mir: &Mir<'tcx>,
-        map: &impl LiveVariableMap<LiveVar = V>,
-    ) -> LivenessResults<V> {
-        LivenessResults {
-            regular: liveness_of_locals(
-                &mir,
-                LivenessMode {
-                    include_regular_use: true,
-                    include_drops: false,
-                },
-                map,
-            ),
-
-            drop: liveness_of_locals(
-                &mir,
-                LivenessMode {
-                    include_regular_use: false,
-                    include_drops: true,
-                },
-                map,
-            ),
-        }
-    }
-}
-
-/// Compute which local variables are live within the given function
-/// `mir`. The liveness mode `mode` determines what sorts of uses are
-/// considered to make a variable live (e.g., do drops count?).
-pub fn liveness_of_locals<'tcx, V: Idx>(
-    mir: &Mir<'tcx>,
-    mode: LivenessMode,
-    map: &impl LiveVariableMap<LiveVar = V>,
-) -> LivenessResult<V> {
-    let num_live_vars = map.num_variables();
-
-    let def_use: IndexVec<_, DefsUses<V>> = mir
-        .basic_blocks()
-        .iter()
-        .map(|b| block(mode, map, b, num_live_vars))
-        .collect();
-
-    let mut outs: IndexVec<_, LiveVarSet<V>> = mir
-        .basic_blocks()
-        .indices()
-        .map(|_| LiveVarSet::new_empty(num_live_vars))
-        .collect();
+    let mut outs: IndexVec<_, LiveVarSet> =
+        body.basic_blocks().indices().map(|_| LiveVarSet::new_empty(num_live_vars)).collect();
 
     let mut bits = LiveVarSet::new_empty(num_live_vars);
 
-    // queue of things that need to be re-processed, and a set containing
-    // the things currently in the queue
-    let mut dirty_queue: WorkQueue<BasicBlock> = WorkQueue::with_all(mir.basic_blocks().len());
+    // The dirty queue contains the set of basic blocks whose entry sets have changed since they
+    // were last processed. At the start of the analysis, we initialize the queue in post-order to
+    // make it more likely that the entry set for a given basic block will have the effects of all
+    // its successors in the CFG applied before it is processed.
+    //
+    // FIXME(ecstaticmorse): Reverse post-order on the reverse CFG may generate a better iteration
+    // order when cycles are present, but the overhead of computing the reverse CFG may outweigh
+    // any benefits. Benchmark this and find out.
+    let mut dirty_queue: WorkQueue<BasicBlock> = WorkQueue::with_none(body.basic_blocks().len());
+    for (bb, _) in traversal::postorder(&body) {
+        dirty_queue.insert(bb);
+    }
 
-    let predecessors = mir.predecessors();
+    // Add blocks which are not reachable from START_BLOCK to the work queue. These blocks will
+    // be processed after the ones added above.
+    for bb in body.basic_blocks().indices() {
+        dirty_queue.insert(bb);
+    }
+
+    let predecessors = body.predecessors();
 
     while let Some(bb) = dirty_queue.pop() {
         // bits = use ∪ (bits - def)
@@ -208,88 +106,25 @@ pub fn liveness_of_locals<'tcx, V: Idx>(
         }
     }
 
-    LivenessResult { mode, outs }
-}
-
-impl<V: Idx> LivenessResult<V> {
-    /// Walks backwards through the statements/terminator in the given
-    /// basic block `block`.  At each point within `block`, invokes
-    /// the callback `op` with the current location and the set of
-    /// variables that are live on entry to that location.
-    pub fn simulate_block<'tcx, OP>(
-        &self,
-        mir: &Mir<'tcx>,
-        block: BasicBlock,
-        map: &impl LiveVariableMap<LiveVar = V>,
-        mut callback: OP,
-    ) where
-        OP: FnMut(Location, &LiveVarSet<V>),
-    {
-        let data = &mir[block];
-
-        // Get a copy of the bits on exit from the block.
-        let mut bits = self.outs[block].clone();
-
-        // Start with the maximal statement index -- i.e., right before
-        // the terminator executes.
-        let mut statement_index = data.statements.len();
-
-        // Compute liveness right before terminator and invoke callback.
-        let terminator_location = Location {
-            block,
-            statement_index,
-        };
-        let num_live_vars = map.num_variables();
-        let mut visitor = DefsUsesVisitor {
-            mode: self.mode,
-            map,
-            defs_uses: DefsUses {
-                defs: LiveVarSet::new_empty(num_live_vars),
-                uses: LiveVarSet::new_empty(num_live_vars),
-            },
-        };
-        // Visit the various parts of the basic block in reverse. If we go
-        // forward, the logic in `add_def` and `add_use` would be wrong.
-        visitor.update_bits_and_do_callback(
-            terminator_location,
-            &data.terminator,
-            &mut bits,
-            &mut callback,
-        );
-
-        // Compute liveness before each statement (in rev order) and invoke callback.
-        for statement in data.statements.iter().rev() {
-            statement_index -= 1;
-            let statement_location = Location {
-                block,
-                statement_index,
-            };
-            visitor.defs_uses.clear();
-            visitor.update_bits_and_do_callback(
-                statement_location,
-                statement,
-                &mut bits,
-                &mut callback,
-            );
-        }
-    }
+    LivenessResult { outs }
 }
 
 #[derive(Eq, PartialEq, Clone)]
 pub enum DefUse {
     Def,
     Use,
+    Drop,
 }
 
-pub fn categorize<'tcx>(context: PlaceContext<'tcx>, mode: LivenessMode) -> Option<DefUse> {
+pub fn categorize(context: PlaceContext) -> Option<DefUse> {
     match context {
         ///////////////////////////////////////////////////////////////////////////
         // DEFS
 
-        PlaceContext::Store |
+        PlaceContext::MutatingUse(MutatingUseContext::Store) |
 
         // This is potentially both a def and a use...
-        PlaceContext::AsmOutput |
+        PlaceContext::MutatingUse(MutatingUseContext::AsmOutput) |
 
         // We let Call define the result in both the success and
         // unwind cases. This is not really correct, however it
@@ -297,12 +132,12 @@ pub fn categorize<'tcx>(context: PlaceContext<'tcx>, mode: LivenessMode) -> Opti
         // generate MIR. To do things properly, we would apply
         // the def in call only to the input from the success
         // path and not the unwind path. -nmatsakis
-        PlaceContext::Call |
+        PlaceContext::MutatingUse(MutatingUseContext::Call) |
 
         // Storage live and storage dead aren't proper defines, but we can ignore
         // values that come before them.
-        PlaceContext::StorageLive |
-        PlaceContext::StorageDead => Some(DefUse::Def),
+        PlaceContext::NonUse(NonUseContext::StorageLive) |
+        PlaceContext::NonUse(NonUseContext::StorageDead) => Some(DefUse::Def),
 
         ///////////////////////////////////////////////////////////////////////////
         // REGULAR USES
@@ -311,24 +146,26 @@ pub fn categorize<'tcx>(context: PlaceContext<'tcx>, mode: LivenessMode) -> Opti
         // purposes of NLL, these are special in that **all** the
         // lifetimes appearing in the variable must be live for each regular use.
 
-        PlaceContext::Projection(..) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::Projection) |
+        PlaceContext::MutatingUse(MutatingUseContext::Projection) |
 
         // Borrows only consider their local used at the point of the borrow.
         // This won't affect the results since we use this analysis for generators
         // and we only care about the result at suspension points. Borrows cannot
         // cross suspension points so this behavior is unproblematic.
-        PlaceContext::Borrow { .. } |
+        PlaceContext::MutatingUse(MutatingUseContext::Borrow) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::SharedBorrow) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::ShallowBorrow) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::UniqueBorrow) |
 
-        PlaceContext::Inspect |
-        PlaceContext::Copy |
-        PlaceContext::Move |
-        PlaceContext::Validate => {
-            if mode.include_regular_use {
-                Some(DefUse::Use)
-            } else {
-                None
-            }
-        }
+        PlaceContext::MutatingUse(MutatingUseContext::AddressOf) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::AddressOf) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::Inspect) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::Copy) |
+        PlaceContext::NonMutatingUse(NonMutatingUseContext::Move) |
+        PlaceContext::NonUse(NonUseContext::AscribeUserTy) |
+        PlaceContext::MutatingUse(MutatingUseContext::Retag) =>
+            Some(DefUse::Use),
 
         ///////////////////////////////////////////////////////////////////////////
         // DROP USES
@@ -338,43 +175,30 @@ pub fn categorize<'tcx>(context: PlaceContext<'tcx>, mode: LivenessMode) -> Opti
         // uses in drop are special because `#[may_dangle]`
         // attributes can affect whether lifetimes must be live.
 
-        PlaceContext::Drop => {
-            if mode.include_drops {
-                Some(DefUse::Use)
-            } else {
-                None
-            }
-        }
+        PlaceContext::MutatingUse(MutatingUseContext::Drop) =>
+            Some(DefUse::Drop),
+
+        // Debug info is neither def nor use.
+        PlaceContext::NonUse(NonUseContext::VarDebugInfo) => None,
     }
 }
 
-struct DefsUsesVisitor<'lv, V, M>
-where
-    V: Idx,
-    M: LiveVariableMap<LiveVar = V> + 'lv,
-{
-    mode: LivenessMode,
-    map: &'lv M,
-    defs_uses: DefsUses<V>,
+struct DefsUsesVisitor {
+    defs_uses: DefsUses,
 }
 
 #[derive(Eq, PartialEq, Clone)]
-struct DefsUses<V: Idx> {
-    defs: LiveVarSet<V>,
-    uses: LiveVarSet<V>,
+struct DefsUses {
+    defs: LiveVarSet,
+    uses: LiveVarSet,
 }
 
-impl<V: Idx> DefsUses<V> {
-    fn clear(&mut self) {
-        self.uses.clear();
-        self.defs.clear();
-    }
-
-    fn apply(&self, bits: &mut LiveVarSet<V>) -> bool {
+impl DefsUses {
+    fn apply(&self, bits: &mut LiveVarSet) -> bool {
         bits.subtract(&self.defs) | bits.union(&self.uses)
     }
 
-    fn add_def(&mut self, index: V) {
+    fn add_def(&mut self, index: Local) {
         // If it was used already in the block, remove that use
         // now that we found a definition.
         //
@@ -384,11 +208,11 @@ impl<V: Idx> DefsUses<V> {
         //     X = 5
         //     // Defs = {}, Uses = {X}
         //     use(X)
-        self.uses.remove(&index);
-        self.defs.add(&index);
+        self.uses.remove(index);
+        self.defs.insert(index);
     }
 
-    fn add_use(&mut self, index: V) {
+    fn add_use(&mut self, index: Local) {
         // Inverse of above.
         //
         // Example:
@@ -399,110 +223,69 @@ impl<V: Idx> DefsUses<V> {
         //     X = 5
         //     // Defs = {}, Uses = {X}
         //     use(X)
-        self.defs.remove(&index);
-        self.uses.add(&index);
+        self.defs.remove(index);
+        self.uses.insert(index);
     }
 }
 
-impl<'lv, V, M> DefsUsesVisitor<'lv, V, M>
-where
-    V: Idx,
-    M: LiveVariableMap<LiveVar = V>,
-{
-    /// Update `bits` with the effects of `value` and call `callback`. We
-    /// should always visit in reverse order. This method assumes that we have
-    /// not visited anything before; if you have, clear `bits` first.
-    fn update_bits_and_do_callback<'tcx, OP>(
-        &mut self,
-        location: Location,
-        value: &impl MirVisitable<'tcx>,
-        bits: &mut LiveVarSet<V>,
-        callback: &mut OP,
-    ) where
-        OP: FnMut(Location, &LiveVarSet<V>),
-    {
-        value.apply(location, self);
-        self.defs_uses.apply(bits);
-        callback(location, bits);
-    }
-}
-
-impl<'tcx, 'lv, V, M> Visitor<'tcx> for DefsUsesVisitor<'lv, V, M>
-where
-    V: Idx,
-    M: LiveVariableMap<LiveVar = V>,
-{
-    fn visit_local(&mut self, &local: &Local, context: PlaceContext<'tcx>, _: Location) {
-        if let Some(v_index) = self.map.from_local(local) {
-            match categorize(context, self.mode) {
-                Some(DefUse::Def) => self.defs_uses.add_def(v_index),
-                Some(DefUse::Use) => self.defs_uses.add_use(v_index),
-                None => (),
-            }
+impl<'tcx> Visitor<'tcx> for DefsUsesVisitor {
+    fn visit_local(&mut self, &local: &Local, context: PlaceContext, _: Location) {
+        match categorize(context) {
+            Some(DefUse::Def) => self.defs_uses.add_def(local),
+            Some(DefUse::Use) | Some(DefUse::Drop) => self.defs_uses.add_use(local),
+            _ => (),
         }
     }
 }
 
-fn block<'tcx, V: Idx>(
-    mode: LivenessMode,
-    map: &impl LiveVariableMap<LiveVar = V>,
-    b: &BasicBlockData<'tcx>,
-    locals: usize,
-) -> DefsUses<V> {
+fn block(b: &BasicBlockData<'_>, locals: usize) -> DefsUses {
     let mut visitor = DefsUsesVisitor {
-        mode,
-        map,
         defs_uses: DefsUses {
             defs: LiveVarSet::new_empty(locals),
             uses: LiveVarSet::new_empty(locals),
         },
     };
 
-    let dummy_location = Location {
-        block: BasicBlock::new(0),
-        statement_index: 0,
-    };
+    let dummy_location = Location { block: BasicBlock::new(0), statement_index: 0 };
 
     // Visit the various parts of the basic block in reverse. If we go
     // forward, the logic in `add_def` and `add_use` would be wrong.
-    visitor.visit_terminator(BasicBlock::new(0), b.terminator(), dummy_location);
+    visitor.visit_terminator(b.terminator(), dummy_location);
     for statement in b.statements.iter().rev() {
-        visitor.visit_statement(BasicBlock::new(0), statement, dummy_location);
+        visitor.visit_statement(statement, dummy_location);
     }
 
     visitor.defs_uses
 }
 
-pub fn dump_mir<'a, 'tcx, V: Idx>(
-    tcx: TyCtxt<'a, 'tcx, 'tcx>,
+pub fn dump_mir<'tcx>(
+    tcx: TyCtxt<'tcx>,
     pass_name: &str,
-    source: MirSource,
-    mir: &Mir<'tcx>,
-    map: &impl LiveVariableMap<LiveVar = V>,
-    result: &LivenessResult<V>,
+    source: MirSource<'tcx>,
+    body: &Body<'tcx>,
+    result: &LivenessResult,
 ) {
     if !dump_enabled(tcx, pass_name, source) {
         return;
     }
-    let node_path = item_path::with_forced_impl_filename_line(|| {
+    let node_path = ty::print::with_forced_impl_filename_line(|| {
         // see notes on #41697 below
-        tcx.item_path_str(source.def_id)
+        tcx.def_path_str(source.def_id())
     });
-    dump_matched_mir_node(tcx, pass_name, &node_path, source, mir, map, result);
+    dump_matched_mir_node(tcx, pass_name, &node_path, source, body, result);
 }
 
-fn dump_matched_mir_node<'a, 'tcx, V: Idx>(
-    tcx: TyCtxt<'a, 'tcx, 'tcx>,
+fn dump_matched_mir_node<'tcx>(
+    tcx: TyCtxt<'tcx>,
     pass_name: &str,
     node_path: &str,
-    source: MirSource,
-    mir: &Mir<'tcx>,
-    map: &dyn LiveVariableMap<LiveVar = V>,
-    result: &LivenessResult<V>,
+    source: MirSource<'tcx>,
+    body: &Body<'tcx>,
+    result: &LivenessResult,
 ) {
     let mut file_path = PathBuf::new();
     file_path.push(Path::new(&tcx.sess.opts.debugging_opts.dump_mir_dir));
-    let item_id = tcx.hir.as_local_node_id(source.def_id).unwrap();
+    let item_id = tcx.hir().as_local_hir_id(source.def_id()).unwrap();
     let file_name = format!("rustc.node{}{}-liveness.mir", item_id, pass_name);
     file_path.push(&file_name);
     let _ = fs::File::create(&file_path).and_then(|mut file| {
@@ -510,31 +293,28 @@ fn dump_matched_mir_node<'a, 'tcx, V: Idx>(
         writeln!(file, "// source = {:?}", source)?;
         writeln!(file, "// pass_name = {}", pass_name)?;
         writeln!(file, "")?;
-        write_mir_fn(tcx, source, mir, map, &mut file, result)?;
+        write_mir_fn(tcx, source, body, &mut file, result)?;
         Ok(())
     });
 }
 
-pub fn write_mir_fn<'a, 'tcx, V: Idx>(
-    tcx: TyCtxt<'a, 'tcx, 'tcx>,
-    src: MirSource,
-    mir: &Mir<'tcx>,
-    map: &dyn LiveVariableMap<LiveVar = V>,
+pub fn write_mir_fn<'tcx>(
+    tcx: TyCtxt<'tcx>,
+    src: MirSource<'tcx>,
+    body: &Body<'tcx>,
     w: &mut dyn Write,
-    result: &LivenessResult<V>,
+    result: &LivenessResult,
 ) -> io::Result<()> {
-    write_mir_intro(tcx, src, mir, w)?;
-    for block in mir.basic_blocks().indices() {
-        let print = |w: &mut dyn Write, prefix, result: &IndexVec<BasicBlock, LiveVarSet<V>>| {
-            let live: Vec<String> = result[block].iter()
-                .map(|v| map.from_live_var(v))
-                .map(|local| format!("{:?}", local))
-                .collect();
+    write_mir_intro(tcx, src, body, w)?;
+    for block in body.basic_blocks().indices() {
+        let print = |w: &mut dyn Write, prefix, result: &IndexVec<BasicBlock, LiveVarSet>| {
+            let live: Vec<String> =
+                result[block].iter().map(|local| format!("{:?}", local)).collect();
             writeln!(w, "{} {{{}}}", prefix, live.join(", "))
         };
-        write_basic_block(tcx, block, mir, &mut |_, _| Ok(()), w)?;
+        write_basic_block(tcx, block, body, &mut |_, _| Ok(()), w)?;
         print(w, "   ", &result.outs)?;
-        if block.index() + 1 != mir.basic_blocks().len() {
+        if block.index() + 1 != body.basic_blocks().len() {
             writeln!(w, "")?;
         }
     }

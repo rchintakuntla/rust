@@ -1,10 +1,11 @@
 -include ../tools.mk
 
+# needs-sanitizer-support
+# only-linux
+# only-x86_64
+
 all:
-ifeq ($(TARGET),x86_64-unknown-linux-gnu)
-ifdef SANITIZER_SUPPORT
 	$(RUSTC) -g -Z sanitizer=memory -Z print-link-args uninit.rs | $(CGREP) librustc_msan
 	$(TMPDIR)/uninit 2>&1 | $(CGREP) use-of-uninitialized-value
-endif
-endif
-
+	$(RUSTC) -g -Z sanitizer=memory -Z print-link-args maybeuninit.rs | $(CGREP) librustc_msan
+	$(TMPDIR)/maybeuninit 2>&1 | $(CGREP) use-of-uninitialized-value

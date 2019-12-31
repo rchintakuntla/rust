@@ -1,13 +1,3 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // Check that when we compile the static `XXX` into MIR, we do not
 // generate `StorageStart` or `StorageEnd` statements.
 
@@ -46,12 +36,12 @@ fn main() {
 // END RUST SOURCE
 // START rustc.XXX.mir_map.0.mir
 //    let mut _0: &'static Foo;
-//    let mut _1: &'static Foo;
-//    let mut _2: Foo;
+//    let _1: &'static Foo;
+//    let _2: Foo;
 //    let mut _3: &'static [(u32, u32)];
 //    let mut _4: &'static [(u32, u32); 42];
-//    let mut _5: &'static [(u32, u32); 42];
-//    let mut _6: [(u32, u32); 42];
+//    let _5: &'static [(u32, u32); 42];
+//    let _6: [(u32, u32); 42];
 //    let mut _7: (u32, u32);
 //    let mut _8: (u32, u32);
 //    let mut _9: (u32, u32);
@@ -188,12 +178,12 @@ fn main() {
 //        _6 = [move _7, move _8, move _9, move _10, move _11, move _12, move _13, move _14, move _15, move _16, move _17, move _18, move _19, move _20, move _21, move _22, move _23, move _24, move _25, move _26, move _27, move _28, move _29, move _30, move _31, move _32, move _33, move _34, move _35, move _36, move _37, move _38, move _39, move _40, move _41, move _42, move _43, move _44, move _45, move _46, move _47, move _48];
 //        _5 = &_6;
 //        _4 = &(*_5);
-//        _3 = move _4 as &'static [(u32, u32)] (Unsize);
+//        _3 = move _4 as &'static [(u32, u32)] (Pointer(Unsize));
 //        _2 = Foo { tup: const "hi", data: move _3 };
 //        _1 = &_2;
 //        _0 = &(*_1);
-//        StorageDead(_1);
 //        StorageDead(_5);
+//        StorageDead(_1);
 //        return;
 //    }
 //}

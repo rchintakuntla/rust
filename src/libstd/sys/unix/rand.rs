@@ -1,36 +1,27 @@
-// Copyright 2013-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use mem;
-use slice;
+use crate::mem;
+use crate::slice;
 
 pub fn hashmap_random_keys() -> (u64, u64) {
     let mut v = (0, 0);
     unsafe {
-        let view = slice::from_raw_parts_mut(&mut v as *mut _ as *mut u8,
-                                             mem::size_of_val(&v));
+        let view = slice::from_raw_parts_mut(&mut v as *mut _ as *mut u8, mem::size_of_val(&v));
         imp::fill_bytes(view);
     }
-    return v
+    v
 }
 
-#[cfg(all(unix,
-          not(target_os = "ios"),
-          not(target_os = "openbsd"),
-          not(target_os = "freebsd"),
-          not(target_os = "fuchsia")))]
+#[cfg(all(
+    unix,
+    not(target_os = "ios"),
+    not(target_os = "openbsd"),
+    not(target_os = "freebsd"),
+    not(target_os = "netbsd"),
+    not(target_os = "fuchsia"),
+    not(target_os = "redox")
+))]
 mod imp {
-    use fs::File;
-    use io::Read;
-    use libc;
-    use sys::os::errno;
+    use crate::fs::File;
+    use crate::io::Read;
 
     #[cfg(any(target_os = "linux", target_os = "android"))]
     fn getrandom(buf: &mut [u8]) -> libc::c_long {
@@ -40,9 +31,20 @@ mod imp {
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    fn getrandom(_buf: &mut [u8]) -> libc::c_long { -1 }
+    fn getrandom_fill_bytes(_buf: &mut [u8]) -> bool {
+        false
+    }
 
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     fn getrandom_fill_bytes(v: &mut [u8]) -> bool {
+        use crate::sync::atomic::{AtomicBool, Ordering};
+        use crate::sys::os::errno;
+
+        static GETRANDOM_UNAVAILABLE: AtomicBool = AtomicBool::new(false);
+        if GETRANDOM_UNAVAILABLE.load(Ordering::Relaxed) {
+            return false;
+        }
+
         let mut read = 0;
         while read < v.len() {
             let result = getrandom(&mut v[read..]);
@@ -50,8 +52,16 @@ mod imp {
                 let err = errno() as libc::c_int;
                 if err == libc::EINTR {
                     continue;
+                } else if err == libc::ENOSYS || err == libc::EPERM {
+                    // Fall back to reading /dev/urandom if `getrandom` is not
+                    // supported on the current kernel.
+                    //
+                    // Also fall back in case it is disabled by something like
+                    // seccomp or inside of virtual machines.
+                    GETRANDOM_UNAVAILABLE.store(true, Ordering::Relaxed);
+                    return false;
                 } else if err == libc::EAGAIN {
-                    return false
+                    return false;
                 } else {
                     panic!("unexpected getrandom error: {}", err);
                 }
@@ -59,66 +69,37 @@ mod imp {
                 read += result as usize;
             }
         }
-
-        return true
+        true
     }
-
-    #[cfg(any(target_os = "linux", target_os = "android"))]
-    fn is_getrandom_available() -> bool {
-        use io;
-        use sync::atomic::{AtomicBool, Ordering};
-        use sync::Once;
-
-        static CHECKER: Once = Once::new();
-        static AVAILABLE: AtomicBool = AtomicBool::new(false);
-
-        CHECKER.call_once(|| {
-            let mut buf: [u8; 0] = [];
-            let result = getrandom(&mut buf);
-            let available = if result == -1 {
-                let err = io::Error::last_os_error().raw_os_error();
-                err != Some(libc::ENOSYS)
-            } else {
-                true
-            };
-            AVAILABLE.store(available, Ordering::Relaxed);
-        });
-
-        AVAILABLE.load(Ordering::Relaxed)
-    }
-
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    fn is_getrandom_available() -> bool { false }
 
     pub fn fill_bytes(v: &mut [u8]) {
         // getrandom_fill_bytes here can fail if getrandom() returns EAGAIN,
         // meaning it would have blocked because the non-blocking pool (urandom)
-        // has not initialized in the kernel yet due to a lack of entropy the
+        // has not initialized in the kernel yet due to a lack of entropy. The
         // fallback we do here is to avoid blocking applications which could
         // depend on this call without ever knowing they do and don't have a
-        // work around.  The PRNG of /dev/urandom will still be used but not
-        // over a completely full entropy pool
-        if is_getrandom_available() && getrandom_fill_bytes(v) {
-            return
+        // work around. The PRNG of /dev/urandom will still be used but over a
+        // possibly predictable entropy pool.
+        if getrandom_fill_bytes(v) {
+            return;
         }
 
-        let mut file = File::open("/dev/urandom")
-            .expect("failed to open /dev/urandom");
-        file.read_exact(v).expect("failed to read /dev/urandom");
+        // getrandom failed because it is permanently or temporarily (because
+        // of missing entropy) unavailable. Open /dev/urandom, read from it,
+        // and close it again.
+        let mut file = File::open("/dev/urandom").expect("failed to open /dev/urandom");
+        file.read_exact(v).expect("failed to read /dev/urandom")
     }
 }
 
 #[cfg(target_os = "openbsd")]
 mod imp {
-    use libc;
-    use sys::os::errno;
+    use crate::sys::os::errno;
 
     pub fn fill_bytes(v: &mut [u8]) {
         // getentropy(2) permits a maximum buffer size of 256 bytes
         for s in v.chunks_mut(256) {
-            let ret = unsafe {
-                libc::getentropy(s.as_mut_ptr() as *mut libc::c_void, s.len())
-            };
+            let ret = unsafe { libc::getentropy(s.as_mut_ptr() as *mut libc::c_void, s.len()) };
             if ret == -1 {
                 panic!("unexpected getentropy error: {}", errno());
             }
@@ -126,40 +107,39 @@ mod imp {
     }
 }
 
+// On iOS and MacOS `SecRandomCopyBytes` calls `CCRandomCopyBytes` with
+// `kCCRandomDefault`. `CCRandomCopyBytes` manages a CSPRNG which is seeded
+// from `/dev/random` and which runs on its own thread accessed via GCD.
+// This seems needlessly heavyweight for the purposes of generating two u64s
+// once per thread in `hashmap_random_keys`. Therefore `SecRandomCopyBytes` is
+// only used on iOS where direct access to `/dev/urandom` is blocked by the
+// sandbox.
 #[cfg(target_os = "ios")]
 mod imp {
-    use io;
+    use crate::io;
+    use crate::ptr;
     use libc::{c_int, size_t};
-    use ptr;
 
     enum SecRandom {}
 
     #[allow(non_upper_case_globals)]
     const kSecRandomDefault: *const SecRandom = ptr::null();
 
-    extern {
-        fn SecRandomCopyBytes(rnd: *const SecRandom,
-                              count: size_t,
-                              bytes: *mut u8) -> c_int;
+    extern "C" {
+        fn SecRandomCopyBytes(rnd: *const SecRandom, count: size_t, bytes: *mut u8) -> c_int;
     }
 
     pub fn fill_bytes(v: &mut [u8]) {
-        let ret = unsafe {
-            SecRandomCopyBytes(kSecRandomDefault,
-                               v.len(),
-                               v.as_mut_ptr())
-        };
+        let ret = unsafe { SecRandomCopyBytes(kSecRandomDefault, v.len(), v.as_mut_ptr()) };
         if ret == -1 {
-            panic!("couldn't generate random bytes: {}",
-                   io::Error::last_os_error());
+            panic!("couldn't generate random bytes: {}", io::Error::last_os_error());
         }
     }
 }
 
-#[cfg(target_os = "freebsd")]
+#[cfg(any(target_os = "freebsd", target_os = "netbsd"))]
 mod imp {
-    use libc;
-    use ptr;
+    use crate::ptr;
 
     pub fn fill_bytes(v: &mut [u8]) {
         let mib = [libc::CTL_KERN, libc::KERN_ARND];
@@ -167,13 +147,22 @@ mod imp {
         for s in v.chunks_mut(256) {
             let mut s_len = s.len();
             let ret = unsafe {
-                libc::sysctl(mib.as_ptr(), mib.len() as libc::c_uint,
-                             s.as_mut_ptr() as *mut _, &mut s_len,
-                             ptr::null(), 0)
+                libc::sysctl(
+                    mib.as_ptr(),
+                    mib.len() as libc::c_uint,
+                    s.as_mut_ptr() as *mut _,
+                    &mut s_len,
+                    ptr::null(),
+                    0,
+                )
             };
             if ret == -1 || s_len != s.len() {
-                panic!("kern.arandom sysctl failed! (returned {}, s.len() {}, oldlenp {})",
-                       ret, s.len(), s_len);
+                panic!(
+                    "kern.arandom sysctl failed! (returned {}, s.len() {}, oldlenp {})",
+                    ret,
+                    s.len(),
+                    s_len
+                );
             }
         }
     }
@@ -182,11 +171,23 @@ mod imp {
 #[cfg(target_os = "fuchsia")]
 mod imp {
     #[link(name = "zircon")]
-    extern {
+    extern "C" {
         fn zx_cprng_draw(buffer: *mut u8, len: usize);
     }
 
     pub fn fill_bytes(v: &mut [u8]) {
         unsafe { zx_cprng_draw(v.as_mut_ptr(), v.len()) }
+    }
+}
+
+#[cfg(target_os = "redox")]
+mod imp {
+    use crate::fs::File;
+    use crate::io::Read;
+
+    pub fn fill_bytes(v: &mut [u8]) {
+        // Open rand:, read from it, and close it again.
+        let mut file = File::open("rand:").expect("failed to open rand:");
+        file.read_exact(v).expect("failed to read rand:")
     }
 }

@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::borrow::Cow;
 use std::cmp::Ordering::{Equal, Greater, Less};
 use std::str::from_utf8;
@@ -17,15 +7,15 @@ fn test_le() {
     assert!("" <= "");
     assert!("" <= "foo");
     assert!("foo" <= "foo");
-    assert!("foo" != "bar");
+    assert_ne!("foo", "bar");
 }
 
 #[test]
 fn test_find() {
     assert_eq!("hello".find('l'), Some(2));
-    assert_eq!("hello".find(|c:char| c == 'o'), Some(4));
+    assert_eq!("hello".find(|c: char| c == 'o'), Some(4));
     assert!("hello".find('x').is_none());
-    assert!("hello".find(|c:char| c == 'x').is_none());
+    assert!("hello".find(|c: char| c == 'x').is_none());
     assert_eq!("ประเทศไทย中华Việt Nam".find('华'), Some(30));
     assert_eq!("ประเทศไทย中华Việt Nam".find(|c: char| c == '华'), Some(30));
 }
@@ -33,9 +23,9 @@ fn test_find() {
 #[test]
 fn test_rfind() {
     assert_eq!("hello".rfind('l'), Some(3));
-    assert_eq!("hello".rfind(|c:char| c == 'o'), Some(4));
+    assert_eq!("hello".rfind(|c: char| c == 'o'), Some(4));
     assert!("hello".rfind('x').is_none());
-    assert!("hello".rfind(|c:char| c == 'x').is_none());
+    assert!("hello".rfind(|c: char| c == 'x').is_none());
     assert_eq!("ประเทศไทย中华Việt Nam".rfind('华'), Some(30));
     assert_eq!("ประเทศไทย中华Việt Nam".rfind(|c: char| c == '华'), Some(30));
 }
@@ -75,7 +65,7 @@ fn test_find_str() {
     assert_eq!(data[0..43].find(""), Some(0));
     assert_eq!(data[6..43].find(""), Some(6 - 6));
 
-    assert_eq!(data[0..43].find("ประ"), Some( 0));
+    assert_eq!(data[0..43].find("ประ"), Some(0));
     assert_eq!(data[0..43].find("ทศไ"), Some(12));
     assert_eq!(data[0..43].find("ย中"), Some(24));
     assert_eq!(data[0..43].find("iệt"), Some(34));
@@ -91,10 +81,7 @@ fn test_find_str() {
     let string = "Việt Namacbaabcaabaaba";
     for (i, ci) in string.char_indices() {
         let ip = i + ci.len_utf8();
-        for j in string[ip..].char_indices()
-                             .map(|(i, _)| i)
-                             .chain(Some(string.len() - ip))
-        {
+        for j in string[ip..].char_indices().map(|(i, _)| i).chain(Some(string.len() - ip)) {
             let pat = &string[i..ip + j];
             assert!(match string.find(pat) {
                 None => false,
@@ -108,15 +95,15 @@ fn test_find_str() {
     }
 }
 
-fn s(x: &str) -> String { x.to_string() }
+fn s(x: &str) -> String {
+    x.to_string()
+}
 
 macro_rules! test_concat {
-    ($expected: expr, $string: expr) => {
-        {
-            let s: String = $string.concat();
-            assert_eq!($expected, s);
-        }
-    }
+    ($expected: expr, $string: expr) => {{
+        let s: String = $string.concat();
+        assert_eq!($expected, s);
+    }};
 }
 
 #[test]
@@ -135,12 +122,10 @@ fn test_concat_for_different_lengths() {
 }
 
 macro_rules! test_join {
-    ($expected: expr, $string: expr, $delim: expr) => {
-        {
-            let s = $string.join($delim);
-            assert_eq!($expected, s);
-        }
-    }
+    ($expected: expr, $string: expr, $delim: expr) => {{
+        let s = $string.join($delim);
+        assert_eq!($expected, s);
+    }};
 }
 
 #[test]
@@ -176,10 +161,11 @@ fn test_join_for_different_lengths_with_long_separator() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // Miri is too slow
 fn test_unsafe_slice() {
-    assert_eq!("ab", unsafe {"abc".get_unchecked(0..2)});
-    assert_eq!("bc", unsafe {"abc".get_unchecked(1..3)});
-    assert_eq!("", unsafe {"abc".get_unchecked(1..1)});
+    assert_eq!("ab", unsafe { "abc".get_unchecked(0..2) });
+    assert_eq!("bc", unsafe { "abc".get_unchecked(1..3) });
+    assert_eq!("", unsafe { "abc".get_unchecked(1..1) });
     fn a_million_letter_a() -> String {
         let mut i = 0;
         let mut rs = String::new();
@@ -199,8 +185,7 @@ fn test_unsafe_slice() {
         rs
     }
     let letters = a_million_letter_a();
-    assert_eq!(half_a_million_letter_a(),
-        unsafe { letters.get_unchecked(0..500000)});
+    assert_eq!(half_a_million_letter_a(), unsafe { letters.get_unchecked(0..500000) });
 }
 
 #[test]
@@ -313,8 +298,7 @@ mod slice_index {
     //
     // This is not suitable for testing failure on invalid inputs.
     macro_rules! assert_range_eq {
-        ($s:expr, $range:expr, $expected:expr)
-        => {
+        ($s:expr, $range:expr, $expected:expr) => {
             let mut s: String = $s.to_owned();
             let mut expected: String = $expected.to_owned();
             {
@@ -325,7 +309,8 @@ mod slice_index {
                 assert_eq!(s.get($range), Some(expected), "(in assertion for: get)");
                 unsafe {
                     assert_eq!(
-                        s.get_unchecked($range), expected,
+                        s.get_unchecked($range),
+                        expected,
                         "(in assertion for: get_unchecked)",
                     );
                 }
@@ -334,22 +319,21 @@ mod slice_index {
                 let s: &mut str = &mut s;
                 let expected: &mut str = &mut expected;
 
+                assert_eq!(&mut s[$range], expected, "(in assertion for: index_mut)",);
                 assert_eq!(
-                    &mut s[$range], expected,
-                    "(in assertion for: index_mut)",
-                );
-                assert_eq!(
-                    s.get_mut($range), Some(&mut expected[..]),
+                    s.get_mut($range),
+                    Some(&mut expected[..]),
                     "(in assertion for: get_mut)",
                 );
                 unsafe {
                     assert_eq!(
-                        s.get_unchecked_mut($range), expected,
+                        s.get_unchecked_mut($range),
+                        expected,
                         "(in assertion for: get_unchecked_mut)",
                     );
                 }
             }
-        }
+        };
     }
 
     // Make sure the macro can actually detect bugs,
@@ -469,15 +453,15 @@ mod slice_index {
         assert_range_eq!(data, 30..33, "华");
 
         /*0: 中
-          3: 华
-          6: V
-          7: i
-          8: ệ
-         11: t
-         12:
-         13: N
-         14: a
-         15: m */
+         3: 华
+         6: V
+         7: i
+         8: ệ
+        11: t
+        12:
+        13: N
+        14: a
+        15: m */
         let ss = "中华Việt Nam";
         assert_range_eq!(ss, 3..6, "华");
         assert_range_eq!(ss, 6..16, "Việt Nam");
@@ -492,7 +476,8 @@ mod slice_index {
     }
 
     #[test]
-    #[cfg(not(target_arch = "asmjs"))] // hits an OOM
+    #[cfg_attr(target_os = "emscripten", ignore)] // hits an OOM
+    #[cfg_attr(miri, ignore)] // Miri is too slow
     fn simple_big() {
         fn a_million_letter_x() -> String {
             let mut i = 0;
@@ -594,7 +579,7 @@ mod slice_index {
     }
 
     mod boundary {
-        const DATA: &'static str = "abcαβγ";
+        const DATA: &str = "abcαβγ";
 
         const BAD_START: usize = 4;
         const GOOD_START: usize = 3;
@@ -658,7 +643,7 @@ mod slice_index {
         }
     }
 
-    const LOREM_PARAGRAPH: &'static str = "\
+    const LOREM_PARAGRAPH: &str = "\
     Lorem ipsum dolor sit amet, consectetur adipiscing elit. Suspendisse quis lorem \
     sit amet dolor ultricies condimentum. Praesent iaculis purus elit, ac malesuada \
     quam malesuada in. Duis sed orci eros. Suspendisse sit amet magna mollis, mollis \
@@ -668,13 +653,13 @@ mod slice_index {
 
     // check the panic includes the prefix of the sliced string
     #[test]
-    #[should_panic(expected="byte index 1024 is out of bounds of `Lorem ipsum dolor sit amet")]
+    #[should_panic(expected = "byte index 1024 is out of bounds of `Lorem ipsum dolor sit amet")]
     fn test_slice_fail_truncated_1() {
         &LOREM_PARAGRAPH[..1024];
     }
     // check the truncation in the panic message
     #[test]
-    #[should_panic(expected="luctus, im`[...]")]
+    #[should_panic(expected = "luctus, im`[...]")]
     fn test_slice_fail_truncated_2() {
         &LOREM_PARAGRAPH[..1024];
     }
@@ -720,40 +705,44 @@ fn test_is_char_boundary() {
         // ensure character locations are boundaries and continuation bytes are not
         assert!(s.is_char_boundary(i), "{} is a char boundary in {:?}", i, s);
         for j in 1..ch.len_utf8() {
-            assert!(!s.is_char_boundary(i + j),
-                    "{} should not be a char boundary in {:?}", i + j, s);
+            assert!(
+                !s.is_char_boundary(i + j),
+                "{} should not be a char boundary in {:?}",
+                i + j,
+                s
+            );
         }
     }
 }
 
 #[test]
-fn test_trim_left_matches() {
+fn test_trim_start_matches() {
     let v: &[char] = &[];
-    assert_eq!(" *** foo *** ".trim_left_matches(v), " *** foo *** ");
+    assert_eq!(" *** foo *** ".trim_start_matches(v), " *** foo *** ");
     let chars: &[char] = &['*', ' '];
-    assert_eq!(" *** foo *** ".trim_left_matches(chars), "foo *** ");
-    assert_eq!(" ***  *** ".trim_left_matches(chars), "");
-    assert_eq!("foo *** ".trim_left_matches(chars), "foo *** ");
+    assert_eq!(" *** foo *** ".trim_start_matches(chars), "foo *** ");
+    assert_eq!(" ***  *** ".trim_start_matches(chars), "");
+    assert_eq!("foo *** ".trim_start_matches(chars), "foo *** ");
 
-    assert_eq!("11foo1bar11".trim_left_matches('1'), "foo1bar11");
+    assert_eq!("11foo1bar11".trim_start_matches('1'), "foo1bar11");
     let chars: &[char] = &['1', '2'];
-    assert_eq!("12foo1bar12".trim_left_matches(chars), "foo1bar12");
-    assert_eq!("123foo1bar123".trim_left_matches(|c: char| c.is_numeric()), "foo1bar123");
+    assert_eq!("12foo1bar12".trim_start_matches(chars), "foo1bar12");
+    assert_eq!("123foo1bar123".trim_start_matches(|c: char| c.is_numeric()), "foo1bar123");
 }
 
 #[test]
-fn test_trim_right_matches() {
+fn test_trim_end_matches() {
     let v: &[char] = &[];
-    assert_eq!(" *** foo *** ".trim_right_matches(v), " *** foo *** ");
+    assert_eq!(" *** foo *** ".trim_end_matches(v), " *** foo *** ");
     let chars: &[char] = &['*', ' '];
-    assert_eq!(" *** foo *** ".trim_right_matches(chars), " *** foo");
-    assert_eq!(" ***  *** ".trim_right_matches(chars), "");
-    assert_eq!(" *** foo".trim_right_matches(chars), " *** foo");
+    assert_eq!(" *** foo *** ".trim_end_matches(chars), " *** foo");
+    assert_eq!(" ***  *** ".trim_end_matches(chars), "");
+    assert_eq!(" *** foo".trim_end_matches(chars), " *** foo");
 
-    assert_eq!("11foo1bar11".trim_right_matches('1'), "11foo1bar");
+    assert_eq!("11foo1bar11".trim_end_matches('1'), "11foo1bar");
     let chars: &[char] = &['1', '2'];
-    assert_eq!("12foo1bar12".trim_right_matches(chars), "12foo1bar");
-    assert_eq!("123foo1bar123".trim_right_matches(|c: char| c.is_numeric()), "123foo1bar");
+    assert_eq!("12foo1bar12".trim_end_matches(chars), "12foo1bar");
+    assert_eq!("123foo1bar123".trim_end_matches(|c: char| c.is_numeric()), "123foo1bar");
 }
 
 #[test]
@@ -772,23 +761,23 @@ fn test_trim_matches() {
 }
 
 #[test]
-fn test_trim_left() {
-    assert_eq!("".trim_left(), "");
-    assert_eq!("a".trim_left(), "a");
-    assert_eq!("    ".trim_left(), "");
-    assert_eq!("     blah".trim_left(), "blah");
-    assert_eq!("   \u{3000}  wut".trim_left(), "wut");
-    assert_eq!("hey ".trim_left(), "hey ");
+fn test_trim_start() {
+    assert_eq!("".trim_start(), "");
+    assert_eq!("a".trim_start(), "a");
+    assert_eq!("    ".trim_start(), "");
+    assert_eq!("     blah".trim_start(), "blah");
+    assert_eq!("   \u{3000}  wut".trim_start(), "wut");
+    assert_eq!("hey ".trim_start(), "hey ");
 }
 
 #[test]
-fn test_trim_right() {
-    assert_eq!("".trim_right(), "");
-    assert_eq!("a".trim_right(), "a");
-    assert_eq!("    ".trim_right(), "");
-    assert_eq!("blah     ".trim_right(), "blah");
-    assert_eq!("wut   \u{3000}  ".trim_right(), "wut");
-    assert_eq!(" hey".trim_right(), " hey");
+fn test_trim_end() {
+    assert_eq!("".trim_end(), "");
+    assert_eq!("a".trim_end(), "a");
+    assert_eq!("    ".trim_end(), "");
+    assert_eq!("blah     ".trim_end(), "blah");
+    assert_eq!("wut   \u{3000}  ".trim_end(), "wut");
+    assert_eq!(" hey".trim_end(), " hey");
 }
 
 #[test]
@@ -854,7 +843,7 @@ fn from_utf8_error() {
             let error = from_utf8($input).unwrap_err();
             assert_eq!(error.valid_up_to(), $expected_valid_up_to);
             assert_eq!(error.error_len(), $expected_error_len);
-        }
+        };
     }
     test!(b"A\xC3\xA9 \xFF ", 4, Some(1));
     test!(b"A\xC3\xA9 \x80 ", 4, Some(1));
@@ -881,9 +870,8 @@ fn from_utf8_error() {
 fn test_as_bytes() {
     // no null
     let v = [
-        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228,
-        184, 173, 229, 141, 142, 86, 105, 225, 187, 135, 116, 32, 78, 97,
-        109
+        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228, 184, 173, 229, 141, 142,
+        86, 105, 225, 187, 135, 116, 32, 78, 97, 109,
     ];
     let b: &[u8] = &[];
     assert_eq!("".as_bytes(), b);
@@ -989,15 +977,15 @@ fn test_split_at_boundscheck() {
 
 #[test]
 fn test_escape_unicode() {
-    assert_eq!("abc".escape_unicode(), "\\u{61}\\u{62}\\u{63}");
-    assert_eq!("a c".escape_unicode(), "\\u{61}\\u{20}\\u{63}");
-    assert_eq!("\r\n\t".escape_unicode(), "\\u{d}\\u{a}\\u{9}");
-    assert_eq!("'\"\\".escape_unicode(), "\\u{27}\\u{22}\\u{5c}");
-    assert_eq!("\x00\x01\u{fe}\u{ff}".escape_unicode(), "\\u{0}\\u{1}\\u{fe}\\u{ff}");
-    assert_eq!("\u{100}\u{ffff}".escape_unicode(), "\\u{100}\\u{ffff}");
-    assert_eq!("\u{10000}\u{10ffff}".escape_unicode(), "\\u{10000}\\u{10ffff}");
-    assert_eq!("ab\u{fb00}".escape_unicode(), "\\u{61}\\u{62}\\u{fb00}");
-    assert_eq!("\u{1d4ea}\r".escape_unicode(), "\\u{1d4ea}\\u{d}");
+    assert_eq!("abc".escape_unicode().to_string(), "\\u{61}\\u{62}\\u{63}");
+    assert_eq!("a c".escape_unicode().to_string(), "\\u{61}\\u{20}\\u{63}");
+    assert_eq!("\r\n\t".escape_unicode().to_string(), "\\u{d}\\u{a}\\u{9}");
+    assert_eq!("'\"\\".escape_unicode().to_string(), "\\u{27}\\u{22}\\u{5c}");
+    assert_eq!("\x00\x01\u{fe}\u{ff}".escape_unicode().to_string(), "\\u{0}\\u{1}\\u{fe}\\u{ff}");
+    assert_eq!("\u{100}\u{ffff}".escape_unicode().to_string(), "\\u{100}\\u{ffff}");
+    assert_eq!("\u{10000}\u{10ffff}".escape_unicode().to_string(), "\\u{10000}\\u{10ffff}");
+    assert_eq!("ab\u{fb00}".escape_unicode().to_string(), "\\u{61}\\u{62}\\u{fb00}");
+    assert_eq!("\u{1d4ea}\r".escape_unicode().to_string(), "\\u{1d4ea}\\u{d}");
 }
 
 #[test]
@@ -1005,34 +993,37 @@ fn test_escape_debug() {
     // Note that there are subtleties with the number of backslashes
     // on the left- and right-hand sides. In particular, Unicode code points
     // are usually escaped with two backslashes on the right-hand side, as
-    // they are escaped. However, when the character is unescaped (e.g. for
+    // they are escaped. However, when the character is unescaped (e.g., for
     // printable characters), only a single backslash appears (as the character
     // itself appears in the debug string).
-    assert_eq!("abc".escape_debug(), "abc");
-    assert_eq!("a c".escape_debug(), "a c");
-    assert_eq!("éèê".escape_debug(), "éèê");
-    assert_eq!("\r\n\t".escape_debug(), "\\r\\n\\t");
-    assert_eq!("'\"\\".escape_debug(), "\\'\\\"\\\\");
-    assert_eq!("\u{7f}\u{ff}".escape_debug(), "\\u{7f}\u{ff}");
-    assert_eq!("\u{100}\u{ffff}".escape_debug(), "\u{100}\\u{ffff}");
-    assert_eq!("\u{10000}\u{10ffff}".escape_debug(), "\u{10000}\\u{10ffff}");
-    assert_eq!("ab\u{200b}".escape_debug(), "ab\\u{200b}");
-    assert_eq!("\u{10d4ea}\r".escape_debug(), "\\u{10d4ea}\\r");
-    assert_eq!("\u{301}a\u{301}bé\u{e000}".escape_debug(), "\\u{301}a\u{301}bé\\u{e000}");
+    assert_eq!("abc".escape_debug().to_string(), "abc");
+    assert_eq!("a c".escape_debug().to_string(), "a c");
+    assert_eq!("éèê".escape_debug().to_string(), "éèê");
+    assert_eq!("\r\n\t".escape_debug().to_string(), "\\r\\n\\t");
+    assert_eq!("'\"\\".escape_debug().to_string(), "\\'\\\"\\\\");
+    assert_eq!("\u{7f}\u{ff}".escape_debug().to_string(), "\\u{7f}\u{ff}");
+    assert_eq!("\u{100}\u{ffff}".escape_debug().to_string(), "\u{100}\\u{ffff}");
+    assert_eq!("\u{10000}\u{10ffff}".escape_debug().to_string(), "\u{10000}\\u{10ffff}");
+    assert_eq!("ab\u{200b}".escape_debug().to_string(), "ab\\u{200b}");
+    assert_eq!("\u{10d4ea}\r".escape_debug().to_string(), "\\u{10d4ea}\\r");
+    assert_eq!(
+        "\u{301}a\u{301}bé\u{e000}".escape_debug().to_string(),
+        "\\u{301}a\u{301}bé\\u{e000}"
+    );
 }
 
 #[test]
 fn test_escape_default() {
-    assert_eq!("abc".escape_default(), "abc");
-    assert_eq!("a c".escape_default(), "a c");
-    assert_eq!("éèê".escape_default(), "\\u{e9}\\u{e8}\\u{ea}");
-    assert_eq!("\r\n\t".escape_default(), "\\r\\n\\t");
-    assert_eq!("'\"\\".escape_default(), "\\'\\\"\\\\");
-    assert_eq!("\u{7f}\u{ff}".escape_default(), "\\u{7f}\\u{ff}");
-    assert_eq!("\u{100}\u{ffff}".escape_default(), "\\u{100}\\u{ffff}");
-    assert_eq!("\u{10000}\u{10ffff}".escape_default(), "\\u{10000}\\u{10ffff}");
-    assert_eq!("ab\u{200b}".escape_default(), "ab\\u{200b}");
-    assert_eq!("\u{10d4ea}\r".escape_default(), "\\u{10d4ea}\\r");
+    assert_eq!("abc".escape_default().to_string(), "abc");
+    assert_eq!("a c".escape_default().to_string(), "a c");
+    assert_eq!("éèê".escape_default().to_string(), "\\u{e9}\\u{e8}\\u{ea}");
+    assert_eq!("\r\n\t".escape_default().to_string(), "\\r\\n\\t");
+    assert_eq!("'\"\\".escape_default().to_string(), "\\'\\\"\\\\");
+    assert_eq!("\u{7f}\u{ff}".escape_default().to_string(), "\\u{7f}\\u{ff}");
+    assert_eq!("\u{100}\u{ffff}".escape_default().to_string(), "\\u{100}\\u{ffff}");
+    assert_eq!("\u{10000}\u{10ffff}".escape_default().to_string(), "\\u{10000}\\u{10ffff}");
+    assert_eq!("ab\u{200b}".escape_default().to_string(), "ab\\u{200b}");
+    assert_eq!("\u{10d4ea}\r".escape_default().to_string(), "\\u{10d4ea}\\r");
 }
 
 #[test]
@@ -1047,7 +1038,7 @@ fn test_total_ord() {
 #[test]
 fn test_iterator() {
     let s = "ศไทย中华Việt Nam";
-    let v = ['ศ','ไ','ท','ย','中','华','V','i','ệ','t',' ','N','a','m'];
+    let v = ['ศ', 'ไ', 'ท', 'ย', '中', '华', 'V', 'i', 'ệ', 't', ' ', 'N', 'a', 'm'];
 
     let mut pos = 0;
     let it = s.chars();
@@ -1063,7 +1054,7 @@ fn test_iterator() {
 #[test]
 fn test_rev_iterator() {
     let s = "ศไทย中华Việt Nam";
-    let v = ['m', 'a', 'N', ' ', 't', 'ệ','i','V','华','中','ย','ท','ไ','ศ'];
+    let v = ['m', 'a', 'N', ' ', 't', 'ệ', 'i', 'V', '华', '中', 'ย', 'ท', 'ไ', 'ศ'];
 
     let mut pos = 0;
     let it = s.chars().rev();
@@ -1076,9 +1067,10 @@ fn test_rev_iterator() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // Miri is too slow
 fn test_chars_decoding() {
     let mut bytes = [0; 4];
-    for c in (0..0x110000).filter_map(::std::char::from_u32) {
+    for c in (0..0x110000).filter_map(std::char::from_u32) {
         let s = c.encode_utf8(&mut bytes);
         if Some(c) != s.chars().next() {
             panic!("character {:x}={} does not decode correctly", c as u32, c);
@@ -1087,9 +1079,10 @@ fn test_chars_decoding() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // Miri is too slow
 fn test_chars_rev_decoding() {
     let mut bytes = [0; 4];
-    for c in (0..0x110000).filter_map(::std::char::from_u32) {
+    for c in (0..0x110000).filter_map(std::char::from_u32) {
         let s = c.encode_utf8(&mut bytes);
         if Some(c) != s.chars().rev().next() {
             panic!("character {:x}={} does not decode correctly", c as u32, c);
@@ -1102,7 +1095,7 @@ fn test_iterator_clone() {
     let s = "ศไทย中华Việt Nam";
     let mut it = s.chars();
     it.next();
-    assert!(it.clone().zip(it).all(|(x,y)| x == y));
+    assert!(it.clone().zip(it).all(|(x, y)| x == y));
 }
 
 #[test]
@@ -1114,12 +1107,21 @@ fn test_iterator_last() {
 }
 
 #[test]
+fn test_chars_debug() {
+    let s = "ศไทย中华Việt Nam";
+    let c = s.chars();
+    assert_eq!(
+        format!("{:?}", c),
+        r#"Chars(['ศ', 'ไ', 'ท', 'ย', '中', '华', 'V', 'i', 'ệ', 't', ' ', 'N', 'a', 'm'])"#
+    );
+}
+
+#[test]
 fn test_bytesator() {
     let s = "ศไทย中华Việt Nam";
     let v = [
-        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228,
-        184, 173, 229, 141, 142, 86, 105, 225, 187, 135, 116, 32, 78, 97,
-        109
+        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228, 184, 173, 229, 141, 142,
+        86, 105, 225, 187, 135, 116, 32, 78, 97, 109,
     ];
     let mut pos = 0;
 
@@ -1133,9 +1135,8 @@ fn test_bytesator() {
 fn test_bytes_revator() {
     let s = "ศไทย中华Việt Nam";
     let v = [
-        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228,
-        184, 173, 229, 141, 142, 86, 105, 225, 187, 135, 116, 32, 78, 97,
-        109
+        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228, 184, 173, 229, 141, 142,
+        86, 105, 225, 187, 135, 116, 32, 78, 97, 109,
     ];
     let mut pos = v.len();
 
@@ -1149,9 +1150,8 @@ fn test_bytes_revator() {
 fn test_bytesator_nth() {
     let s = "ศไทย中华Việt Nam";
     let v = [
-        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228,
-        184, 173, 229, 141, 142, 86, 105, 225, 187, 135, 116, 32, 78, 97,
-        109
+        224, 184, 168, 224, 185, 132, 224, 184, 151, 224, 184, 162, 228, 184, 173, 229, 141, 142,
+        86, 105, 225, 187, 135, 116, 32, 78, 97, 109,
     ];
 
     let mut b = s.bytes();
@@ -1180,7 +1180,7 @@ fn test_bytesator_last() {
 fn test_char_indicesator() {
     let s = "ศไทย中华Việt Nam";
     let p = [0, 3, 6, 9, 12, 15, 18, 19, 20, 23, 24, 25, 26, 27];
-    let v = ['ศ','ไ','ท','ย','中','华','V','i','ệ','t',' ','N','a','m'];
+    let v = ['ศ', 'ไ', 'ท', 'ย', '中', '华', 'V', 'i', 'ệ', 't', ' ', 'N', 'a', 'm'];
 
     let mut pos = 0;
     let it = s.char_indices();
@@ -1197,7 +1197,7 @@ fn test_char_indicesator() {
 fn test_char_indices_revator() {
     let s = "ศไทย中华Việt Nam";
     let p = [27, 26, 25, 24, 23, 20, 19, 18, 15, 12, 9, 6, 3, 0];
-    let v = ['m', 'a', 'N', ' ', 't', 'ệ','i','V','华','中','ย','ท','ไ','ศ'];
+    let v = ['m', 'a', 'N', ' ', 't', 'ệ', 'i', 'V', '华', '中', 'ย', 'ท', 'ไ', 'ศ'];
 
     let mut pos = 0;
     let it = s.char_indices().rev();
@@ -1309,10 +1309,10 @@ fn test_splitator() {
     t("zzXXXzYYYz", "XXX", &["zz", "zYYYz"]);
     t(".XXX.YYY.", ".", &["", "XXX", "YYY", ""]);
     t("", ".", &[""]);
-    t("zz", "zz", &["",""]);
+    t("zz", "zz", &["", ""]);
     t("ok", "z", &["ok"]);
-    t("zzz", "zz", &["","z"]);
-    t("zzzzz", "zz", &["","","z"]);
+    t("zzz", "zz", &["", "z"]);
+    t("zzzzz", "zz", &["", "", "z"]);
 }
 
 #[test]
@@ -1378,13 +1378,14 @@ fn test_bool_from_str() {
 fn check_contains_all_substrings(s: &str) {
     assert!(s.contains(""));
     for i in 0..s.len() {
-        for j in i+1..s.len() + 1 {
+        for j in i + 1..=s.len() {
             assert!(s.contains(&s[i..j]));
         }
     }
 }
 
 #[test]
+#[cfg_attr(miri, ignore)] // Miri is too slow
 fn strslice_issue_16589() {
     assert!("bananas".contains("nana"));
 
@@ -1399,8 +1400,8 @@ fn strslice_issue_16878() {
     assert!(!"00abc01234567890123456789abc".contains("bcabc"));
 }
 
-
 #[test]
+#[cfg_attr(miri, ignore)] // Miri is too slow
 fn test_strslice_contains() {
     let x = "There are moments, Jeeves, when one asks oneself, 'Do trousers matter?'";
     check_contains_all_substrings(x);
@@ -1433,14 +1434,14 @@ fn test_split_char_iterator() {
     let data = "\nMäry häd ä little lämb\nLittle lämb\n";
 
     let split: Vec<&str> = data.split(' ').collect();
-    assert_eq!( split, ["\nMäry", "häd", "ä", "little", "lämb\nLittle", "lämb\n"]);
+    assert_eq!(split, ["\nMäry", "häd", "ä", "little", "lämb\nLittle", "lämb\n"]);
 
     let mut rsplit: Vec<&str> = data.split(' ').rev().collect();
     rsplit.reverse();
     assert_eq!(rsplit, ["\nMäry", "häd", "ä", "little", "lämb\nLittle", "lämb\n"]);
 
     let split: Vec<&str> = data.split(|c: char| c == ' ').collect();
-    assert_eq!( split, ["\nMäry", "häd", "ä", "little", "lämb\nLittle", "lämb\n"]);
+    assert_eq!(split, ["\nMäry", "häd", "ä", "little", "lämb\nLittle", "lämb\n"]);
 
     let mut rsplit: Vec<&str> = data.split(|c: char| c == ' ').rev().collect();
     rsplit.reverse();
@@ -1448,14 +1449,14 @@ fn test_split_char_iterator() {
 
     // Unicode
     let split: Vec<&str> = data.split('ä').collect();
-    assert_eq!( split, ["\nM", "ry h", "d ", " little l", "mb\nLittle l", "mb\n"]);
+    assert_eq!(split, ["\nM", "ry h", "d ", " little l", "mb\nLittle l", "mb\n"]);
 
     let mut rsplit: Vec<&str> = data.split('ä').rev().collect();
     rsplit.reverse();
     assert_eq!(rsplit, ["\nM", "ry h", "d ", " little l", "mb\nLittle l", "mb\n"]);
 
     let split: Vec<&str> = data.split(|c: char| c == 'ä').collect();
-    assert_eq!( split, ["\nM", "ry h", "d ", " little l", "mb\nLittle l", "mb\n"]);
+    assert_eq!(split, ["\nM", "ry h", "d ", " little l", "mb\nLittle l", "mb\n"]);
 
     let mut rsplit: Vec<&str> = data.split(|c: char| c == 'ä').rev().collect();
     rsplit.reverse();
@@ -1477,8 +1478,7 @@ fn test_rev_split_char_iterator_no_trailing() {
 
 #[test]
 fn test_utf16_code_units() {
-    assert_eq!("é\u{1F4A9}".encode_utf16().collect::<Vec<u16>>(),
-               [0xE9, 0xD83D, 0xDCA9])
+    assert_eq!("é\u{1F4A9}".encode_utf16().collect::<Vec<u16>>(), [0xE9, 0xD83D, 0xDCA9])
 }
 
 #[test]
@@ -1514,18 +1514,16 @@ fn contains_weird_cases() {
 
 #[test]
 fn trim_ws() {
-    assert_eq!(" \t  a \t  ".trim_left_matches(|c: char| c.is_whitespace()),
-                    "a \t  ");
-    assert_eq!(" \t  a \t  ".trim_right_matches(|c: char| c.is_whitespace()),
-               " \t  a");
-    assert_eq!(" \t  a \t  ".trim_matches(|c: char| c.is_whitespace()),
-                    "a");
-    assert_eq!(" \t   \t  ".trim_left_matches(|c: char| c.is_whitespace()),
-                         "");
-    assert_eq!(" \t   \t  ".trim_right_matches(|c: char| c.is_whitespace()),
-               "");
-    assert_eq!(" \t   \t  ".trim_matches(|c: char| c.is_whitespace()),
-               "");
+    assert_eq!(" \t  a \t  ".trim_start_matches(|c: char| c.is_whitespace()), "a \t  ");
+    assert_eq!(" \t  a \t  ".trim_end_matches(|c: char| c.is_whitespace()), " \t  a");
+    assert_eq!(" \t  a \t  ".trim_start_matches(|c: char| c.is_whitespace()), "a \t  ");
+    assert_eq!(" \t  a \t  ".trim_end_matches(|c: char| c.is_whitespace()), " \t  a");
+    assert_eq!(" \t  a \t  ".trim_matches(|c: char| c.is_whitespace()), "a");
+    assert_eq!(" \t   \t  ".trim_start_matches(|c: char| c.is_whitespace()), "");
+    assert_eq!(" \t   \t  ".trim_end_matches(|c: char| c.is_whitespace()), "");
+    assert_eq!(" \t   \t  ".trim_start_matches(|c: char| c.is_whitespace()), "");
+    assert_eq!(" \t   \t  ".trim_end_matches(|c: char| c.is_whitespace()), "");
+    assert_eq!(" \t   \t  ".trim_matches(|c: char| c.is_whitespace()), "");
 }
 
 #[test]
@@ -1601,9 +1599,8 @@ fn test_repeat() {
 }
 
 mod pattern {
-    use std::str::pattern::Pattern;
-    use std::str::pattern::{Searcher, ReverseSearcher};
-    use std::str::pattern::SearchStep::{self, Match, Reject, Done};
+    use std::str::pattern::SearchStep::{self, Done, Match, Reject};
+    use std::str::pattern::{Pattern, ReverseSearcher, Searcher};
 
     macro_rules! make_test {
         ($name:ident, $p:expr, $h:expr, [$($e:expr,)*]) => {
@@ -1623,14 +1620,16 @@ mod pattern {
         }
     }
 
-    fn cmp_search_to_vec<'a, P: Pattern<'a>>(rev: bool, pat: P, haystack: &'a str,
-                                             right: Vec<SearchStep>)
-    where P::Searcher: ReverseSearcher<'a>
-    {
+    fn cmp_search_to_vec<'a>(
+        rev: bool,
+        pat: impl Pattern<'a, Searcher: ReverseSearcher<'a>>,
+        haystack: &'a str,
+        right: Vec<SearchStep>,
+    ) {
         let mut searcher = pat.into_searcher(haystack);
         let mut v = vec![];
         loop {
-            match if !rev {searcher.next()} else {searcher.next_back()} {
+            match if !rev { searcher.next() } else { searcher.next_back() } {
                 Match(a, b) => v.push(Match(a, b)),
                 Reject(a, b) => v.push(Reject(a, b)),
                 Done => break,
@@ -1645,8 +1644,7 @@ mod pattern {
 
         for (i, e) in right.iter().enumerate() {
             match *e {
-                Match(a, b) | Reject(a, b)
-                if a <= b && a == first_index => {
+                Match(a, b) | Reject(a, b) if a <= b && a == first_index => {
                     first_index = b;
                 }
                 _ => {
@@ -1667,77 +1665,88 @@ mod pattern {
         assert_eq!(v, right);
     }
 
-    make_test!(str_searcher_ascii_haystack, "bb", "abbcbbd", [
-        Reject(0, 1),
-        Match (1, 3),
-        Reject(3, 4),
-        Match (4, 6),
-        Reject(6, 7),
-    ]);
-    make_test!(str_searcher_ascii_haystack_seq, "bb", "abbcbbbbd", [
-        Reject(0, 1),
-        Match (1, 3),
-        Reject(3, 4),
-        Match (4, 6),
-        Match (6, 8),
-        Reject(8, 9),
-    ]);
-    make_test!(str_searcher_empty_needle_ascii_haystack, "", "abbcbbd", [
-        Match (0, 0),
-        Reject(0, 1),
-        Match (1, 1),
-        Reject(1, 2),
-        Match (2, 2),
-        Reject(2, 3),
-        Match (3, 3),
-        Reject(3, 4),
-        Match (4, 4),
-        Reject(4, 5),
-        Match (5, 5),
-        Reject(5, 6),
-        Match (6, 6),
-        Reject(6, 7),
-        Match (7, 7),
-    ]);
-    make_test!(str_searcher_multibyte_haystack, " ", "├──", [
-        Reject(0, 3),
-        Reject(3, 6),
-        Reject(6, 9),
-    ]);
-    make_test!(str_searcher_empty_needle_multibyte_haystack, "", "├──", [
-        Match (0, 0),
-        Reject(0, 3),
-        Match (3, 3),
-        Reject(3, 6),
-        Match (6, 6),
-        Reject(6, 9),
-        Match (9, 9),
-    ]);
-    make_test!(str_searcher_empty_needle_empty_haystack, "", "", [
-        Match(0, 0),
-    ]);
-    make_test!(str_searcher_nonempty_needle_empty_haystack, "├", "", [
-    ]);
-    make_test!(char_searcher_ascii_haystack, 'b', "abbcbbd", [
-        Reject(0, 1),
-        Match (1, 2),
-        Match (2, 3),
-        Reject(3, 4),
-        Match (4, 5),
-        Match (5, 6),
-        Reject(6, 7),
-    ]);
-    make_test!(char_searcher_multibyte_haystack, ' ', "├──", [
-        Reject(0, 3),
-        Reject(3, 6),
-        Reject(6, 9),
-    ]);
-    make_test!(char_searcher_short_haystack, '\u{1F4A9}', "* \t", [
-        Reject(0, 1),
-        Reject(1, 2),
-        Reject(2, 3),
-    ]);
-
+    make_test!(
+        str_searcher_ascii_haystack,
+        "bb",
+        "abbcbbd",
+        [Reject(0, 1), Match(1, 3), Reject(3, 4), Match(4, 6), Reject(6, 7),]
+    );
+    make_test!(
+        str_searcher_ascii_haystack_seq,
+        "bb",
+        "abbcbbbbd",
+        [Reject(0, 1), Match(1, 3), Reject(3, 4), Match(4, 6), Match(6, 8), Reject(8, 9),]
+    );
+    make_test!(
+        str_searcher_empty_needle_ascii_haystack,
+        "",
+        "abbcbbd",
+        [
+            Match(0, 0),
+            Reject(0, 1),
+            Match(1, 1),
+            Reject(1, 2),
+            Match(2, 2),
+            Reject(2, 3),
+            Match(3, 3),
+            Reject(3, 4),
+            Match(4, 4),
+            Reject(4, 5),
+            Match(5, 5),
+            Reject(5, 6),
+            Match(6, 6),
+            Reject(6, 7),
+            Match(7, 7),
+        ]
+    );
+    make_test!(
+        str_searcher_multibyte_haystack,
+        " ",
+        "├──",
+        [Reject(0, 3), Reject(3, 6), Reject(6, 9),]
+    );
+    make_test!(
+        str_searcher_empty_needle_multibyte_haystack,
+        "",
+        "├──",
+        [
+            Match(0, 0),
+            Reject(0, 3),
+            Match(3, 3),
+            Reject(3, 6),
+            Match(6, 6),
+            Reject(6, 9),
+            Match(9, 9),
+        ]
+    );
+    make_test!(str_searcher_empty_needle_empty_haystack, "", "", [Match(0, 0),]);
+    make_test!(str_searcher_nonempty_needle_empty_haystack, "├", "", []);
+    make_test!(
+        char_searcher_ascii_haystack,
+        'b',
+        "abbcbbd",
+        [
+            Reject(0, 1),
+            Match(1, 2),
+            Match(2, 3),
+            Reject(3, 4),
+            Match(4, 5),
+            Match(5, 6),
+            Reject(6, 7),
+        ]
+    );
+    make_test!(
+        char_searcher_multibyte_haystack,
+        ' ',
+        "├──",
+        [Reject(0, 3), Reject(3, 6), Reject(6, 9),]
+    );
+    make_test!(
+        char_searcher_short_haystack,
+        '\u{1F4A9}',
+        "* \t",
+        [Reject(0, 1), Reject(1, 2), Reject(2, 3),]
+    );
 }
 
 macro_rules! generate_iterator_test {
@@ -1834,7 +1843,10 @@ generate_iterator_test! {
 fn different_str_pattern_forwarding_lifetimes() {
     use std::str::pattern::Pattern;
 
-    fn foo<'a, P>(p: P) where for<'b> &'b P: Pattern<'a> {
+    fn foo<'a, P>(p: P)
+    where
+        for<'b> &'b P: Pattern<'a>,
+    {
         for _ in 0..3 {
             "asdf".find(&p);
         }

@@ -1,13 +1,3 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // A signature is a string representation of an item's type signature, excluding
 // any body. It also includes ids for any defs or refs in the signature. For
 // example:
@@ -35,23 +25,25 @@
 //
 // FIXME where clauses need implementing, defs/refs in generics are mostly missing.
 
-use {id_from_def_id, id_from_node_id, SaveContext};
+use crate::{id_from_def_id, id_from_node_id, SaveContext};
 
 use rls_data::{SigElement, Signature};
 
-use rustc::hir::def::Def;
-use syntax::ast::{self, NodeId};
+use rustc::hir::def::{DefKind, Res};
+use syntax::ast::{self, Extern, NodeId};
 use syntax::print::pprust;
 
-
-pub fn item_signature(item: &ast::Item, scx: &SaveContext) -> Option<Signature> {
+pub fn item_signature(item: &ast::Item, scx: &SaveContext<'_, '_>) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
     }
     item.make(0, None, scx).ok()
 }
 
-pub fn foreign_item_signature(item: &ast::ForeignItem, scx: &SaveContext) -> Option<Signature> {
+pub fn foreign_item_signature(
+    item: &ast::ForeignItem,
+    scx: &SaveContext<'_, '_>,
+) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
     }
@@ -60,7 +52,7 @@ pub fn foreign_item_signature(item: &ast::ForeignItem, scx: &SaveContext) -> Opt
 
 /// Signature for a struct or tuple field declaration.
 /// Does not include a trailing comma.
-pub fn field_signature(field: &ast::StructField, scx: &SaveContext) -> Option<Signature> {
+pub fn field_signature(field: &ast::StructField, scx: &SaveContext<'_, '_>) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
     }
@@ -68,19 +60,19 @@ pub fn field_signature(field: &ast::StructField, scx: &SaveContext) -> Option<Si
 }
 
 /// Does not include a trailing comma.
-pub fn variant_signature(variant: &ast::Variant, scx: &SaveContext) -> Option<Signature> {
+pub fn variant_signature(variant: &ast::Variant, scx: &SaveContext<'_, '_>) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
     }
-    variant.node.make(0, None, scx).ok()
+    variant.make(0, None, scx).ok()
 }
 
 pub fn method_signature(
     id: NodeId,
     ident: ast::Ident,
     generics: &ast::Generics,
-    m: &ast::MethodSig,
-    scx: &SaveContext,
+    m: &ast::FnSig,
+    scx: &SaveContext<'_, '_>,
 ) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
@@ -93,7 +85,7 @@ pub fn assoc_const_signature(
     ident: ast::Name,
     ty: &ast::Ty,
     default: Option<&ast::Expr>,
-    scx: &SaveContext,
+    scx: &SaveContext<'_, '_>,
 ) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
@@ -106,7 +98,7 @@ pub fn assoc_type_signature(
     ident: ast::Ident,
     bounds: Option<&ast::GenericBounds>,
     default: Option<&ast::Ty>,
-    scx: &SaveContext,
+    scx: &SaveContext<'_, '_>,
 ) -> Option<Signature> {
     if !scx.config.signatures {
         return None;
@@ -114,10 +106,10 @@ pub fn assoc_type_signature(
     make_assoc_type_signature(id, ident, bounds, default, scx).ok()
 }
 
-type Result = ::std::result::Result<Signature, &'static str>;
+type Result = std::result::Result<Signature, &'static str>;
 
 trait Sig {
-    fn make(&self, offset: usize, id: Option<NodeId>, scx: &SaveContext) -> Result;
+    fn make(&self, offset: usize, id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result;
 }
 
 fn extend_sig(
@@ -138,36 +130,32 @@ fn replace_text(mut sig: Signature, text: String) -> Signature {
 }
 
 fn merge_sigs(text: String, sigs: Vec<Signature>) -> Signature {
-    let mut result = Signature {
-        text,
-        defs: vec![],
-        refs: vec![],
-    };
+    let mut result = Signature { text, defs: vec![], refs: vec![] };
 
     let (defs, refs): (Vec<_>, Vec<_>) = sigs.into_iter().map(|s| (s.defs, s.refs)).unzip();
 
-    result
-        .defs
-        .extend(defs.into_iter().flat_map(|ds| ds.into_iter()));
-    result
-        .refs
-        .extend(refs.into_iter().flat_map(|rs| rs.into_iter()));
+    result.defs.extend(defs.into_iter().flat_map(|ds| ds.into_iter()));
+    result.refs.extend(refs.into_iter().flat_map(|rs| rs.into_iter()));
 
     result
 }
 
 fn text_sig(text: String) -> Signature {
-    Signature {
-        text,
-        defs: vec![],
-        refs: vec![],
+    Signature { text, defs: vec![], refs: vec![] }
+}
+
+fn push_extern(text: &mut String, ext: Extern) {
+    match ext {
+        Extern::None => {}
+        Extern::Implicit => text.push_str("extern "),
+        Extern::Explicit(abi) => text.push_str(&format!("extern \"{}\" ", abi.symbol)),
     }
 }
 
 impl Sig for ast::Ty {
-    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext) -> Result {
+    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
         let id = Some(self.id);
-        match self.node {
+        match self.kind {
             ast::TyKind::Slice(ref ty) => {
                 let nested = ty.make(offset + 1, id, scx)?;
                 let text = format!("[{}]", nested.text);
@@ -175,8 +163,8 @@ impl Sig for ast::Ty {
             }
             ast::TyKind::Ptr(ref mt) => {
                 let prefix = match mt.mutbl {
-                    ast::Mutability::Mutable => "*mut ",
-                    ast::Mutability::Immutable => "*const ",
+                    ast::Mutability::Mut => "*mut ",
+                    ast::Mutability::Not => "*const ",
                 };
                 let nested = mt.ty.make(offset + prefix.len(), id, scx)?;
                 let text = format!("{}{}", prefix, nested.text);
@@ -188,7 +176,7 @@ impl Sig for ast::Ty {
                     prefix.push_str(&l.ident.to_string());
                     prefix.push(' ');
                 }
-                if let ast::Mutability::Mutable = mt.mutbl {
+                if let ast::Mutability::Mut = mt.mutbl {
                     prefix.push_str("mut ");
                 };
 
@@ -197,6 +185,7 @@ impl Sig for ast::Ty {
                 Ok(replace_text(nested, text))
             }
             ast::TyKind::Never => Ok(text_sig("!".to_owned())),
+            ast::TyKind::CVarArgs => Ok(text_sig("...".to_owned())),
             ast::TyKind::Tup(ref ts) => {
                 let mut text = "(".to_owned();
                 let mut defs = vec![];
@@ -221,27 +210,25 @@ impl Sig for ast::Ty {
                 if !f.generic_params.is_empty() {
                     // FIXME defs, bounds on lifetimes
                     text.push_str("for<");
-                    text.push_str(&f.generic_params
-                        .iter()
-                        .filter_map(|param| match param.kind {
-                            ast::GenericParamKind::Lifetime { .. } => {
-                                Some(param.ident.to_string())
-                            }
-                            _ => None,
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", "));
+                    text.push_str(
+                        &f.generic_params
+                            .iter()
+                            .filter_map(|param| match param.kind {
+                                ast::GenericParamKind::Lifetime { .. } => {
+                                    Some(param.ident.to_string())
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                    );
                     text.push('>');
                 }
 
                 if f.unsafety == ast::Unsafety::Unsafe {
                     text.push_str("unsafe ");
                 }
-                if f.abi != ::rustc_target::spec::abi::Abi::Rust {
-                    text.push_str("extern");
-                    text.push_str(&f.abi.to_string());
-                    text.push(' ');
-                }
+                push_extern(&mut text, f.ext);
                 text.push_str("fn(");
 
                 let mut defs = vec![];
@@ -279,8 +266,8 @@ impl Sig for ast::Ty {
                 };
 
                 let name = pprust::path_segment_to_string(path.segments.last().ok_or("Bad path")?);
-                let def = scx.get_path_def(id.ok_or("Missing id for Path")?);
-                let id = id_from_def_id(def.def_id());
+                let res = scx.get_path_res(id.ok_or("Missing id for Path")?);
+                let id = id_from_def_id(res.def_id());
                 if path.segments.len() - qself.position == 1 {
                     let start = offset + prefix.len();
                     let end = start + name.len();
@@ -317,33 +304,31 @@ impl Sig for ast::Ty {
                 let text = format!("[{}; {}]", nested_ty.text, expr);
                 Ok(replace_text(nested_ty, text))
             }
-            ast::TyKind::Typeof(_) |
-            ast::TyKind::Infer |
-            ast::TyKind::Err |
-            ast::TyKind::ImplicitSelf |
-            ast::TyKind::Mac(_) => Err("Ty"),
+            ast::TyKind::Typeof(_)
+            | ast::TyKind::Infer
+            | ast::TyKind::Err
+            | ast::TyKind::ImplicitSelf
+            | ast::TyKind::Mac(_) => Err("Ty"),
         }
     }
 }
 
 impl Sig for ast::Item {
-    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext) -> Result {
+    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
         let id = Some(self.id);
 
-        match self.node {
+        match self.kind {
             ast::ItemKind::Static(ref ty, m, ref expr) => {
                 let mut text = "static ".to_owned();
-                if m == ast::Mutability::Mutable {
+                if m == ast::Mutability::Mut {
                     text.push_str("mut ");
                 }
                 let name = self.ident.to_string();
-                let defs = vec![
-                    SigElement {
-                        id: id_from_node_id(self.id, scx),
-                        start: offset + text.len(),
-                        end: offset + text.len() + name.len(),
-                    },
-                ];
+                let defs = vec![SigElement {
+                    id: id_from_node_id(self.id, scx),
+                    start: offset + text.len(),
+                    end: offset + text.len() + name.len(),
+                }];
                 text.push_str(&name);
                 text.push_str(": ");
 
@@ -360,13 +345,11 @@ impl Sig for ast::Item {
             ast::ItemKind::Const(ref ty, ref expr) => {
                 let mut text = "const ".to_owned();
                 let name = self.ident.to_string();
-                let defs = vec![
-                    SigElement {
-                        id: id_from_node_id(self.id, scx),
-                        start: offset + text.len(),
-                        end: offset + text.len() + name.len(),
-                    },
-                ];
+                let defs = vec![SigElement {
+                    id: id_from_node_id(self.id, scx),
+                    start: offset + text.len(),
+                    end: offset + text.len() + name.len(),
+                }];
                 text.push_str(&name);
                 text.push_str(": ");
 
@@ -380,22 +363,18 @@ impl Sig for ast::Item {
 
                 Ok(extend_sig(ty, text, defs, vec![]))
             }
-            ast::ItemKind::Fn(ref decl, header, ref generics, _) => {
+            ast::ItemKind::Fn(ast::FnSig { ref decl, header }, ref generics, _) => {
                 let mut text = String::new();
                 if header.constness.node == ast::Constness::Const {
                     text.push_str("const ");
                 }
-                if header.asyncness.is_async() {
+                if header.asyncness.node.is_async() {
                     text.push_str("async ");
                 }
                 if header.unsafety == ast::Unsafety::Unsafe {
                     text.push_str("unsafe ");
                 }
-                if header.abi != ::rustc_target::spec::abi::Abi::Rust {
-                    text.push_str("extern");
-                    text.push_str(&header.abi.to_string());
-                    text.push(' ');
-                }
+                push_extern(&mut text, header.ext);
                 text.push_str("fn ");
 
                 let mut sig = name_and_generics(text, offset, generics, self.id, self.ident, scx)?;
@@ -427,36 +406,18 @@ impl Sig for ast::Item {
             ast::ItemKind::Mod(ref _mod) => {
                 let mut text = "mod ".to_owned();
                 let name = self.ident.to_string();
-                let defs = vec![
-                    SigElement {
-                        id: id_from_node_id(self.id, scx),
-                        start: offset + text.len(),
-                        end: offset + text.len() + name.len(),
-                    },
-                ];
+                let defs = vec![SigElement {
+                    id: id_from_node_id(self.id, scx),
+                    start: offset + text.len(),
+                    end: offset + text.len() + name.len(),
+                }];
                 text.push_str(&name);
-                // Could be either `mod foo;` or `mod foo { ... }`, but we'll just puck one.
+                // Could be either `mod foo;` or `mod foo { ... }`, but we'll just pick one.
                 text.push(';');
 
-                Ok(Signature {
-                    text,
-                    defs,
-                    refs: vec![],
-                })
+                Ok(Signature { text, defs, refs: vec![] })
             }
-            ast::ItemKind::Existential(ref bounds, ref generics) => {
-                let text = "existential type ".to_owned();
-                let mut sig = name_and_generics(text, offset, generics, self.id, self.ident, scx)?;
-
-                if !bounds.is_empty() {
-                    sig.text.push_str(": ");
-                    sig.text.push_str(&pprust::bounds_to_string(bounds));
-                }
-                sig.text.push(';');
-
-                Ok(sig)
-            }
-            ast::ItemKind::Ty(ref ty, ref generics) => {
+            ast::ItemKind::TyAlias(ref ty, ref generics) => {
                 let text = "type ".to_owned();
                 let mut sig = name_and_generics(text, offset, generics, self.id, self.ident, scx)?;
 
@@ -510,12 +471,7 @@ impl Sig for ast::Item {
             ast::ItemKind::TraitAlias(ref generics, ref bounds) => {
                 let mut text = String::new();
                 text.push_str("trait ");
-                let mut sig = name_and_generics(text,
-                                                offset,
-                                                generics,
-                                                self.id,
-                                                self.ident,
-                                                scx)?;
+                let mut sig = name_and_generics(text, offset, generics, self.id, self.ident, scx)?;
 
                 if !bounds.is_empty() {
                     sig.text.push_str(" = ");
@@ -581,18 +537,20 @@ impl Sig for ast::Item {
 }
 
 impl Sig for ast::Path {
-    fn make(&self, offset: usize, id: Option<NodeId>, scx: &SaveContext) -> Result {
-        let def = scx.get_path_def(id.ok_or("Missing id for Path")?);
+    fn make(&self, offset: usize, id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
+        let res = scx.get_path_res(id.ok_or("Missing id for Path")?);
 
-        let (name, start, end) = match def {
-            Def::Label(..) | Def::PrimTy(..) | Def::SelfTy(..) | Def::Err => {
+        let (name, start, end) = match res {
+            Res::PrimTy(..) | Res::SelfTy(..) | Res::Err => {
                 return Ok(Signature {
                     text: pprust::path_to_string(self),
                     defs: vec![],
                     refs: vec![],
-                })
+                });
             }
-            Def::AssociatedConst(..) | Def::Variant(..) | Def::VariantCtor(..) => {
+            Res::Def(DefKind::AssocConst, _)
+            | Res::Def(DefKind::Variant, _)
+            | Res::Def(DefKind::Ctor(..), _) => {
                 let len = self.segments.len();
                 if len < 2 {
                     return Err("Bad path");
@@ -612,37 +570,43 @@ impl Sig for ast::Path {
             }
         };
 
-        let id = id_from_def_id(def.def_id());
-        Ok(Signature {
-            text: name,
-            defs: vec![],
-            refs: vec![SigElement { id, start, end }],
-        })
+        let id = id_from_def_id(res.def_id());
+        Ok(Signature { text: name, defs: vec![], refs: vec![SigElement { id, start, end }] })
     }
 }
 
 // This does not cover the where clause, which must be processed separately.
 impl Sig for ast::Generics {
-    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext) -> Result {
+    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
         if self.params.is_empty() {
             return Ok(text_sig(String::new()));
         }
 
         let mut text = "<".to_owned();
 
-        let mut defs = vec![];
+        let mut defs = Vec::with_capacity(self.params.len());
         for param in &self.params {
-            let mut param_text = param.ident.to_string();
+            let mut param_text = String::new();
+            if let ast::GenericParamKind::Const { .. } = param.kind {
+                param_text.push_str("const ");
+            }
+            param_text.push_str(&param.ident.as_str());
             defs.push(SigElement {
                 id: id_from_node_id(param.id, scx),
                 start: offset + text.len(),
-                end: offset + text.len() + param_text.len(),
+                end: offset + text.len() + param_text.as_str().len(),
             });
+            if let ast::GenericParamKind::Const { ref ty } = param.kind {
+                param_text.push_str(": ");
+                param_text.push_str(&pprust::ty_to_string(&ty));
+            }
             if !param.bounds.is_empty() {
                 param_text.push_str(": ");
                 match param.kind {
                     ast::GenericParamKind::Lifetime { .. } => {
-                        let bounds = param.bounds.iter()
+                        let bounds = param
+                            .bounds
+                            .iter()
                             .map(|bound| match bound {
                                 ast::GenericBound::Outlives(lt) => lt.ident.to_string(),
                                 _ => panic!(),
@@ -656,6 +620,9 @@ impl Sig for ast::Generics {
                         param_text.push_str(&pprust::bounds_to_string(&param.bounds));
                         // FIXME descend properly into bounds.
                     }
+                    ast::GenericParamKind::Const { .. } => {
+                        // Const generics cannot contain bounds.
+                    }
                 }
             }
             text.push_str(&param_text);
@@ -663,16 +630,12 @@ impl Sig for ast::Generics {
         }
 
         text.push('>');
-        Ok(Signature {
-            text,
-            defs,
-            refs: vec![],
-        })
+        Ok(Signature { text, defs, refs: vec![] })
     }
 }
 
 impl Sig for ast::StructField {
-    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext) -> Result {
+    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
         let mut text = String::new();
         let mut defs = None;
         if let Some(ident) = self.ident {
@@ -693,12 +656,12 @@ impl Sig for ast::StructField {
     }
 }
 
-
-impl Sig for ast::Variant_ {
-    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext) -> Result {
+impl Sig for ast::Variant {
+    fn make(&self, offset: usize, parent_id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
         let mut text = self.ident.to_string();
         match self.data {
-            ast::VariantData::Struct(ref fields, id) => {
+            ast::VariantData::Struct(ref fields, r) => {
+                let id = parent_id.unwrap();
                 let name_def = SigElement {
                     id: id_from_node_id(id, scx),
                     start: offset,
@@ -707,12 +670,16 @@ impl Sig for ast::Variant_ {
                 text.push_str(" { ");
                 let mut defs = vec![name_def];
                 let mut refs = vec![];
-                for f in fields {
-                    let field_sig = f.make(offset + text.len(), Some(id), scx)?;
-                    text.push_str(&field_sig.text);
-                    text.push_str(", ");
-                    defs.extend(field_sig.defs.into_iter());
-                    refs.extend(field_sig.refs.into_iter());
+                if r {
+                    text.push_str("/* parse error */ ");
+                } else {
+                    for f in fields {
+                        let field_sig = f.make(offset + text.len(), Some(id), scx)?;
+                        text.push_str(&field_sig.text);
+                        text.push_str(", ");
+                        defs.extend(field_sig.defs.into_iter());
+                        refs.extend(field_sig.refs.into_iter());
+                    }
                 }
                 text.push('}');
                 Ok(Signature { text, defs, refs })
@@ -742,20 +709,16 @@ impl Sig for ast::Variant_ {
                     start: offset,
                     end: offset + text.len(),
                 };
-                Ok(Signature {
-                    text,
-                    defs: vec![name_def],
-                    refs: vec![],
-                })
+                Ok(Signature { text, defs: vec![name_def], refs: vec![] })
             }
         }
     }
 }
 
 impl Sig for ast::ForeignItem {
-    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext) -> Result {
+    fn make(&self, offset: usize, _parent_id: Option<NodeId>, scx: &SaveContext<'_, '_>) -> Result {
         let id = Some(self.id);
-        match self.node {
+        match self.kind {
             ast::ForeignItemKind::Fn(ref decl, ref generics) => {
                 let mut text = String::new();
                 text.push_str("fn ");
@@ -788,17 +751,15 @@ impl Sig for ast::ForeignItem {
             }
             ast::ForeignItemKind::Static(ref ty, m) => {
                 let mut text = "static ".to_owned();
-                if m {
+                if m == ast::Mutability::Mut {
                     text.push_str("mut ");
                 }
                 let name = self.ident.to_string();
-                let defs = vec![
-                    SigElement {
-                        id: id_from_node_id(self.id, scx),
-                        start: offset + text.len(),
-                        end: offset + text.len() + name.len(),
-                    },
-                ];
+                let defs = vec![SigElement {
+                    id: id_from_node_id(self.id, scx),
+                    start: offset + text.len(),
+                    end: offset + text.len() + name.len(),
+                }];
                 text.push_str(&name);
                 text.push_str(": ");
 
@@ -810,21 +771,15 @@ impl Sig for ast::ForeignItem {
             ast::ForeignItemKind::Ty => {
                 let mut text = "type ".to_owned();
                 let name = self.ident.to_string();
-                let defs = vec![
-                    SigElement {
-                        id: id_from_node_id(self.id, scx),
-                        start: offset + text.len(),
-                        end: offset + text.len() + name.len(),
-                    },
-                ];
+                let defs = vec![SigElement {
+                    id: id_from_node_id(self.id, scx),
+                    start: offset + text.len(),
+                    end: offset + text.len() + name.len(),
+                }];
                 text.push_str(&name);
                 text.push(';');
 
-                Ok(Signature {
-                    text: text,
-                    defs: defs,
-                    refs: vec![],
-                })
+                Ok(Signature { text: text, defs: defs, refs: vec![] })
             }
             ast::ForeignItemKind::Macro(..) => Err("macro"),
         }
@@ -837,7 +792,7 @@ fn name_and_generics(
     generics: &ast::Generics,
     id: NodeId,
     name: ast::Ident,
-    scx: &SaveContext,
+    scx: &SaveContext<'_, '_>,
 ) -> Result {
     let name = name.to_string();
     let def = SigElement {
@@ -852,23 +807,20 @@ fn name_and_generics(
     Ok(extend_sig(generics, text, vec![def], vec![]))
 }
 
-
 fn make_assoc_type_signature(
     id: NodeId,
     ident: ast::Ident,
     bounds: Option<&ast::GenericBounds>,
     default: Option<&ast::Ty>,
-    scx: &SaveContext,
+    scx: &SaveContext<'_, '_>,
 ) -> Result {
     let mut text = "type ".to_owned();
     let name = ident.to_string();
-    let mut defs = vec![
-        SigElement {
-            id: id_from_node_id(id, scx),
-            start: text.len(),
-            end: text.len() + name.len(),
-        },
-    ];
+    let mut defs = vec![SigElement {
+        id: id_from_node_id(id, scx),
+        start: text.len(),
+        end: text.len() + name.len(),
+    }];
     let mut refs = vec![];
     text.push_str(&name);
     if let Some(bounds) = bounds {
@@ -892,17 +844,15 @@ fn make_assoc_const_signature(
     ident: ast::Name,
     ty: &ast::Ty,
     default: Option<&ast::Expr>,
-    scx: &SaveContext,
+    scx: &SaveContext<'_, '_>,
 ) -> Result {
     let mut text = "const ".to_owned();
     let name = ident.to_string();
-    let mut defs = vec![
-        SigElement {
-            id: id_from_node_id(id, scx),
-            start: text.len(),
-            end: text.len() + name.len(),
-        },
-    ];
+    let mut defs = vec![SigElement {
+        id: id_from_node_id(id, scx),
+        start: text.len(),
+        end: text.len() + name.len(),
+    }];
     let mut refs = vec![];
     text.push_str(&name);
     text.push_str(": ");
@@ -924,25 +874,21 @@ fn make_method_signature(
     id: NodeId,
     ident: ast::Ident,
     generics: &ast::Generics,
-    m: &ast::MethodSig,
-    scx: &SaveContext,
+    m: &ast::FnSig,
+    scx: &SaveContext<'_, '_>,
 ) -> Result {
     // FIXME code dup with function signature
     let mut text = String::new();
     if m.header.constness.node == ast::Constness::Const {
         text.push_str("const ");
     }
-    if m.header.asyncness.is_async() {
+    if m.header.asyncness.node.is_async() {
         text.push_str("async ");
     }
     if m.header.unsafety == ast::Unsafety::Unsafe {
         text.push_str("unsafe ");
     }
-    if m.header.abi != ::rustc_target::spec::abi::Abi::Rust {
-        text.push_str("extern");
-        text.push_str(&m.header.abi.to_string());
-        text.push(' ');
-    }
+    push_extern(&mut text, m.header.ext);
     text.push_str("fn ");
 
     let mut sig = name_and_generics(text, 0, generics, id, ident, scx)?;

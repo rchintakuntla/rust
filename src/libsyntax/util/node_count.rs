@@ -1,17 +1,7 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // Simply gives a rought count of the number of nodes in an AST.
 
-use visit::*;
-use ast::*;
+use crate::ast::*;
+use crate::visit::*;
 use syntax_pos::Span;
 
 pub struct NodeCounter {
@@ -20,9 +10,7 @@ pub struct NodeCounter {
 
 impl NodeCounter {
     pub fn new() -> NodeCounter {
-        NodeCounter {
-            count: 0,
-        }
+        NodeCounter { count: 0 }
     }
 }
 
@@ -79,17 +67,13 @@ impl<'ast> Visitor<'ast> for NodeCounter {
         self.count += 1;
         walk_generics(self, g)
     }
-    fn visit_fn(&mut self, fk: FnKind, fd: &FnDecl, s: Span, _: NodeId) {
+    fn visit_fn(&mut self, fk: FnKind<'_>, fd: &FnDecl, s: Span, _: NodeId) {
         self.count += 1;
         walk_fn(self, fk, fd, s)
     }
-    fn visit_trait_item(&mut self, ti: &TraitItem) {
+    fn visit_assoc_item(&mut self, ti: &AssocItem) {
         self.count += 1;
-        walk_trait_item(self, ti)
-    }
-    fn visit_impl_item(&mut self, ii: &ImplItem) {
-        self.count += 1;
-        walk_impl_item(self, ii)
+        walk_assoc_item(self, ti)
     }
     fn visit_trait_ref(&mut self, t: &TraitRef) {
         self.count += 1;
@@ -103,8 +87,7 @@ impl<'ast> Visitor<'ast> for NodeCounter {
         self.count += 1;
         walk_poly_trait_ref(self, t, m)
     }
-    fn visit_variant_data(&mut self, s: &VariantData, _: Ident,
-                          _: &Generics, _: NodeId, _: Span) {
+    fn visit_variant_data(&mut self, s: &VariantData) {
         self.count += 1;
         walk_struct_def(self, s)
     }
@@ -112,14 +95,19 @@ impl<'ast> Visitor<'ast> for NodeCounter {
         self.count += 1;
         walk_struct_field(self, s)
     }
-    fn visit_enum_def(&mut self, enum_definition: &EnumDef,
-                      generics: &Generics, item_id: NodeId, _: Span) {
+    fn visit_enum_def(
+        &mut self,
+        enum_definition: &EnumDef,
+        generics: &Generics,
+        item_id: NodeId,
+        _: Span,
+    ) {
         self.count += 1;
         walk_enum_def(self, enum_definition, generics, item_id)
     }
-    fn visit_variant(&mut self, v: &Variant, g: &Generics, item_id: NodeId) {
+    fn visit_variant(&mut self, v: &Variant) {
         self.count += 1;
-        walk_variant(self, v, g, item_id)
+        walk_variant(self, v)
     }
     fn visit_lifetime(&mut self, lifetime: &Lifetime) {
         self.count += 1;
@@ -141,9 +129,9 @@ impl<'ast> Visitor<'ast> for NodeCounter {
         self.count += 1;
         walk_generic_args(self, path_span, generic_args)
     }
-    fn visit_assoc_type_binding(&mut self, type_binding: &TypeBinding) {
+    fn visit_assoc_ty_constraint(&mut self, constraint: &AssocTyConstraint) {
         self.count += 1;
-        walk_assoc_type_binding(self, type_binding)
+        walk_assoc_ty_constraint(self, constraint)
     }
     fn visit_attribute(&mut self, _attr: &Attribute) {
         self.count += 1;

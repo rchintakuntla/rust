@@ -1,19 +1,11 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+use crate::error::Error;
+use crate::fmt;
+use crate::sync::atomic::{AtomicBool, Ordering};
+use crate::thread;
 
-use error::{Error};
-use fmt;
-use sync::atomic::{AtomicBool, Ordering};
-use thread;
-
-pub struct Flag { failed: AtomicBool }
+pub struct Flag {
+    failed: AtomicBool,
+}
 
 // Note that the Ordering uses to access the `failed` field of `Flag` below is
 // always `Relaxed`, and that's because this isn't actually protecting any data,
@@ -34,11 +26,7 @@ impl Flag {
     #[inline]
     pub fn borrow(&self) -> LockResult<Guard> {
         let ret = Guard { panicking: thread::panicking() };
-        if self.get() {
-            Err(PoisonError::new(ret))
-        } else {
-            Ok(ret)
-        }
+        if self.get() { Err(PoisonError::new(ret)) } else { Ok(ret) }
     }
 
     #[inline]
@@ -146,20 +134,21 @@ pub type TryLockResult<Guard> = Result<Guard, TryLockError<Guard>>;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> fmt::Debug for PoisonError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         "PoisonError { inner: .. }".fmt(f)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> fmt::Display for PoisonError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         "poisoned lock: another task failed inside".fmt(f)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Error for PoisonError<T> {
+    #[allow(deprecated)]
     fn description(&self) -> &str {
         "poisoned lock: another task failed inside"
     }
@@ -174,7 +163,7 @@ impl<T> PoisonError<T> {
     /// [`RwLock::read`]: ../../std/sync/struct.RwLock.html#method.read
     #[stable(feature = "sync_poison", since = "1.2.0")]
     pub fn new(guard: T) -> PoisonError<T> {
-        PoisonError { guard: guard }
+        PoisonError { guard }
     }
 
     /// Consumes this error indicating that a lock is poisoned, returning the
@@ -202,17 +191,23 @@ impl<T> PoisonError<T> {
     /// println!("recovered {} items", data.len());
     /// ```
     #[stable(feature = "sync_poison", since = "1.2.0")]
-    pub fn into_inner(self) -> T { self.guard }
+    pub fn into_inner(self) -> T {
+        self.guard
+    }
 
     /// Reaches into this error indicating that a lock is poisoned, returning a
     /// reference to the underlying guard to allow access regardless.
     #[stable(feature = "sync_poison", since = "1.2.0")]
-    pub fn get_ref(&self) -> &T { &self.guard }
+    pub fn get_ref(&self) -> &T {
+        &self.guard
+    }
 
     /// Reaches into this error indicating that a lock is poisoned, returning a
     /// mutable reference to the underlying guard to allow access regardless.
     #[stable(feature = "sync_poison", since = "1.2.0")]
-    pub fn get_mut(&mut self) -> &mut T { &mut self.guard }
+    pub fn get_mut(&mut self) -> &mut T {
+        &mut self.guard
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -224,46 +219,50 @@ impl<T> From<PoisonError<T>> for TryLockError<T> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> fmt::Debug for TryLockError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TryLockError::Poisoned(..) => "Poisoned(..)".fmt(f),
-            TryLockError::WouldBlock => "WouldBlock".fmt(f)
+            TryLockError::WouldBlock => "WouldBlock".fmt(f),
         }
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> fmt::Display for TryLockError<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             TryLockError::Poisoned(..) => "poisoned lock: another task failed inside",
-            TryLockError::WouldBlock => "try_lock failed because the operation would block"
-        }.fmt(f)
+            TryLockError::WouldBlock => "try_lock failed because the operation would block",
+        }
+        .fmt(f)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> Error for TryLockError<T> {
+    #[allow(deprecated, deprecated_in_future)]
     fn description(&self) -> &str {
         match *self {
             TryLockError::Poisoned(ref p) => p.description(),
-            TryLockError::WouldBlock => "try_lock failed because the operation would block"
+            TryLockError::WouldBlock => "try_lock failed because the operation would block",
         }
     }
 
+    #[allow(deprecated)]
     fn cause(&self) -> Option<&dyn Error> {
         match *self {
             TryLockError::Poisoned(ref p) => Some(p),
-            _ => None
+            _ => None,
         }
     }
 }
 
-pub fn map_result<T, U, F>(result: LockResult<T>, f: F)
-                           -> LockResult<U>
-                           where F: FnOnce(T) -> U {
+pub fn map_result<T, U, F>(result: LockResult<T>, f: F) -> LockResult<U>
+where
+    F: FnOnce(T) -> U,
+{
     match result {
         Ok(t) => Ok(f(t)),
-        Err(PoisonError { guard }) => Err(PoisonError::new(f(guard)))
+        Err(PoisonError { guard }) => Err(PoisonError::new(f(guard))),
     }
 }

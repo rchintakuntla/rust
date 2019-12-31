@@ -1,16 +1,6 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use std::{char,str};
 use std::convert::TryFrom;
 use std::str::FromStr;
+use std::{char, str};
 
 #[test]
 fn test_convert() {
@@ -86,6 +76,8 @@ fn test_to_digit() {
 #[test]
 fn test_to_lowercase() {
     fn lower(c: char) -> String {
+        let to_lowercase = c.to_lowercase();
+        assert_eq!(to_lowercase.len(), to_lowercase.count());
         let iter: String = c.to_lowercase().collect();
         let disp: String = c.to_lowercase().to_string();
         assert_eq!(iter, disp);
@@ -111,6 +103,8 @@ fn test_to_lowercase() {
 #[test]
 fn test_to_uppercase() {
     fn upper(c: char) -> String {
+        let to_uppercase = c.to_uppercase();
+        assert_eq!(to_uppercase.len(), to_uppercase.count());
         let iter: String = c.to_uppercase().collect();
         let disp: String = c.to_uppercase().to_string();
         assert_eq!(iter, disp);
@@ -149,13 +143,13 @@ fn test_is_control() {
 
 #[test]
 fn test_is_numeric() {
-   assert!('2'.is_numeric());
-   assert!('7'.is_numeric());
-   assert!('¾'.is_numeric());
-   assert!(!'c'.is_numeric());
-   assert!(!'i'.is_numeric());
-   assert!(!'z'.is_numeric());
-   assert!(!'Q'.is_numeric());
+    assert!('2'.is_numeric());
+    assert!('7'.is_numeric());
+    assert!('¾'.is_numeric());
+    assert!(!'c'.is_numeric());
+    assert!(!'i'.is_numeric());
+    assert!(!'z'.is_numeric());
+    assert!(!'Q'.is_numeric());
 }
 
 #[test]
@@ -182,9 +176,9 @@ fn test_escape_debug() {
     assert_eq!(string('\u{ff}'), "\u{ff}");
     assert_eq!(string('\u{11b}'), "\u{11b}");
     assert_eq!(string('\u{1d4b6}'), "\u{1d4b6}");
-    assert_eq!(string('\u{301}'), "\\u{301}");     // combining character
-    assert_eq!(string('\u{200b}'),"\\u{200b}");      // zero width space
-    assert_eq!(string('\u{e000}'), "\\u{e000}");     // private use 1
+    assert_eq!(string('\u{301}'), "\\u{301}"); // combining character
+    assert_eq!(string('\u{200b}'), "\\u{200b}"); // zero width space
+    assert_eq!(string('\u{e000}'), "\\u{e000}"); // private use 1
     assert_eq!(string('\u{100000}'), "\\u{100000}"); // private use 2
 }
 
@@ -278,8 +272,8 @@ fn test_len_utf16() {
 fn test_decode_utf16() {
     fn check(s: &[u16], expected: &[Result<char, u16>]) {
         let v = char::decode_utf16(s.iter().cloned())
-                     .map(|r| r.map_err(|e| e.unpaired_surrogate()))
-                     .collect::<Vec<_>>();
+            .map(|r| r.map_err(|e| e.unpaired_surrogate()))
+            .collect::<Vec<_>>();
         assert_eq!(v, expected);
     }
     check(&[0xD800, 0x41, 0x42], &[Err(0xD800), Ok('A'), Ok('B')]);

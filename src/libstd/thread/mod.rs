@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Native threads.
 //!
 //! ## The threading model
@@ -93,7 +83,7 @@
 //! Threads are represented via the [`Thread`] type, which you can get in one of
 //! two ways:
 //!
-//! * By spawning a new thread, e.g. using the [`thread::spawn`][`spawn`]
+//! * By spawning a new thread, e.g., using the [`thread::spawn`][`spawn`]
 //!   function, and calling [`thread`][`JoinHandle::thread`] on the [`JoinHandle`].
 //! * By requesting the current thread, using the [`thread::current`] function.
 //!
@@ -124,7 +114,7 @@
 //! thread, use [`Thread::name`]. A couple examples of where the name of a thread gets used:
 //!
 //! * If a panic occurs in a named thread, the thread name will be printed in the panic message.
-//! * The thread name is provided to the OS where applicable (e.g. `pthread_setname_np` in
+//! * The thread name is provided to the OS where applicable (e.g., `pthread_setname_np` in
 //!   unix-like platforms).
 //!
 //! ## Stack size
@@ -166,32 +156,35 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use any::Any;
-use cell::UnsafeCell;
-use ffi::{CStr, CString};
-use fmt;
-use io;
-use panic;
-use panicking;
-use str;
-use sync::{Mutex, Condvar, Arc};
-use sync::atomic::AtomicUsize;
-use sync::atomic::Ordering::SeqCst;
-use sys::thread as imp;
-use sys_common::mutex;
-use sys_common::thread_info;
-use sys_common::thread;
-use sys_common::{AsInner, IntoInner};
-use time::Duration;
+use crate::any::Any;
+use crate::cell::UnsafeCell;
+use crate::ffi::{CStr, CString};
+use crate::fmt;
+use crate::io;
+use crate::mem;
+use crate::num::NonZeroU64;
+use crate::panic;
+use crate::panicking;
+use crate::str;
+use crate::sync::atomic::AtomicUsize;
+use crate::sync::atomic::Ordering::SeqCst;
+use crate::sync::{Arc, Condvar, Mutex};
+use crate::sys::thread as imp;
+use crate::sys_common::mutex;
+use crate::sys_common::thread;
+use crate::sys_common::thread_info;
+use crate::sys_common::{AsInner, IntoInner};
+use crate::time::Duration;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Thread-local storage
 ////////////////////////////////////////////////////////////////////////////////
 
-#[macro_use] mod local;
+#[macro_use]
+mod local;
 
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use self::local::{LocalKey, AccessError};
+pub use self::local::{AccessError, LocalKey};
 
 // The types used by the thread_local! macro to access TLS keys. Note that there
 // are two types, the "OS" type and the "fast" type. The OS thread local key
@@ -202,14 +195,17 @@ pub use self::local::{LocalKey, AccessError};
 // where fast TLS was not available; end-user code is compiled with fast TLS
 // where available, but both are needed.
 
-#[unstable(feature = "libstd_thread_internals", issue = "0")]
-#[cfg(target_arch = "wasm32")]
-#[doc(hidden)] pub use self::local::statik::Key as __StaticLocalKeyInner;
-#[unstable(feature = "libstd_thread_internals", issue = "0")]
+#[unstable(feature = "libstd_thread_internals", issue = "none")]
 #[cfg(target_thread_local)]
-#[doc(hidden)] pub use self::local::fast::Key as __FastLocalKeyInner;
-#[unstable(feature = "libstd_thread_internals", issue = "0")]
-#[doc(hidden)] pub use self::local::os::Key as __OsLocalKeyInner;
+#[doc(hidden)]
+pub use self::local::fast::Key as __FastLocalKeyInner;
+#[unstable(feature = "libstd_thread_internals", issue = "none")]
+#[doc(hidden)]
+pub use self::local::os::Key as __OsLocalKeyInner;
+#[unstable(feature = "libstd_thread_internals", issue = "none")]
+#[cfg(all(target_arch = "wasm32", not(target_feature = "atomics")))]
+#[doc(hidden)]
+pub use self::local::statik::Key as __StaticLocalKeyInner;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Builder
@@ -233,7 +229,7 @@ pub use self::local::{LocalKey, AccessError};
 ///
 /// You may want to use [`spawn`] instead of [`thread::spawn`], when you want
 /// to recover from a failure to launch a thread, indeed the free function will
-/// panick where the `Builder` method will return a [`io::Result`].
+/// panic where the `Builder` method will return a [`io::Result`].
 ///
 /// # Examples
 ///
@@ -277,7 +273,7 @@ impl Builder {
     ///
     /// let builder = thread::Builder::new()
     ///                               .name("foo".into())
-    ///                               .stack_size(10);
+    ///                               .stack_size(32 * 1024);
     ///
     /// let handler = builder.spawn(|| {
     ///     // thread code
@@ -287,10 +283,7 @@ impl Builder {
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn new() -> Builder {
-        Builder {
-            name: None,
-            stack_size: None,
-        }
+        Builder { name: None, stack_size: None }
     }
 
     /// Names the thread-to-be. Currently the name is used for identification
@@ -326,7 +319,7 @@ impl Builder {
     /// Sets the size of the stack (in bytes) for the new thread.
     ///
     /// The actual stack size may be greater than this value if
-    /// the platform specifies minimal stack size.
+    /// the platform specifies a minimal stack size.
     ///
     /// For more information about the stack size for threads, see
     /// [this module-level documentation][stack-size].
@@ -384,8 +377,83 @@ impl Builder {
     /// handler.join().unwrap();
     /// ```
     #[stable(feature = "rust1", since = "1.0.0")]
-    pub fn spawn<F, T>(self, f: F) -> io::Result<JoinHandle<T>> where
-        F: FnOnce() -> T, F: Send + 'static, T: Send + 'static
+    pub fn spawn<F, T>(self, f: F) -> io::Result<JoinHandle<T>>
+    where
+        F: FnOnce() -> T,
+        F: Send + 'static,
+        T: Send + 'static,
+    {
+        unsafe { self.spawn_unchecked(f) }
+    }
+
+    /// Spawns a new thread without any lifetime restrictions by taking ownership
+    /// of the `Builder`, and returns an [`io::Result`] to its [`JoinHandle`].
+    ///
+    /// The spawned thread may outlive the caller (unless the caller thread
+    /// is the main thread; the whole process is terminated when the main
+    /// thread finishes). The join handle can be used to block on
+    /// termination of the child thread, including recovering its panics.
+    ///
+    /// This method is identical to [`thread::Builder::spawn`][`Builder::spawn`],
+    /// except for the relaxed lifetime bounds, which render it unsafe.
+    /// For a more complete documentation see [`thread::spawn`][`spawn`].
+    ///
+    /// # Errors
+    ///
+    /// Unlike the [`spawn`] free function, this method yields an
+    /// [`io::Result`] to capture any failure to create the thread at
+    /// the OS level.
+    ///
+    /// # Panics
+    ///
+    /// Panics if a thread name was set and it contained null bytes.
+    ///
+    /// # Safety
+    ///
+    /// The caller has to ensure that no references in the supplied thread closure
+    /// or its return type can outlive the spawned thread's lifetime. This can be
+    /// guaranteed in two ways:
+    ///
+    /// - ensure that [`join`][`JoinHandle::join`] is called before any referenced
+    /// data is dropped
+    /// - use only types with `'static` lifetime bounds, i.e., those with no or only
+    /// `'static` references (both [`thread::Builder::spawn`][`Builder::spawn`]
+    /// and [`thread::spawn`][`spawn`] enforce this property statically)
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(thread_spawn_unchecked)]
+    /// use std::thread;
+    ///
+    /// let builder = thread::Builder::new();
+    ///
+    /// let x = 1;
+    /// let thread_x = &x;
+    ///
+    /// let handler = unsafe {
+    ///     builder.spawn_unchecked(move || {
+    ///         println!("x = {}", *thread_x);
+    ///     }).unwrap()
+    /// };
+    ///
+    /// // caller has to ensure `join()` is called, otherwise
+    /// // it is possible to access freed memory if `x` gets
+    /// // dropped before the thread closure is executed!
+    /// handler.join().unwrap();
+    /// ```
+    ///
+    /// [`spawn`]: ../../std/thread/fn.spawn.html
+    /// [`Builder::spawn`]: ../../std/thread/struct.Builder.html#method.spawn
+    /// [`io::Result`]: ../../std/io/type.Result.html
+    /// [`JoinHandle`]: ../../std/thread/struct.JoinHandle.html
+    /// [`JoinHandle::join`]: ../../std/thread/struct.JoinHandle.html#method.join
+    #[unstable(feature = "thread_spawn_unchecked", issue = "55132")]
+    pub unsafe fn spawn_unchecked<'a, F, T>(self, f: F) -> io::Result<JoinHandle<T>>
+    where
+        F: FnOnce() -> T,
+        F: Send + 'a,
+        T: Send + 'a,
     {
         let Builder { name, stack_size } = self;
 
@@ -394,30 +462,39 @@ impl Builder {
         let my_thread = Thread::new(name);
         let their_thread = my_thread.clone();
 
-        let my_packet : Arc<UnsafeCell<Option<Result<T>>>>
-            = Arc::new(UnsafeCell::new(None));
+        let my_packet: Arc<UnsafeCell<Option<Result<T>>>> = Arc::new(UnsafeCell::new(None));
         let their_packet = my_packet.clone();
 
         let main = move || {
             if let Some(name) = their_thread.cname() {
                 imp::Thread::set_name(name);
             }
-            unsafe {
-                thread_info::set(imp::guard::current(), their_thread);
-                #[cfg(feature = "backtrace")]
-                let try_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
-                    ::sys_common::backtrace::__rust_begin_short_backtrace(f)
-                }));
-                #[cfg(not(feature = "backtrace"))]
-                let try_result = panic::catch_unwind(panic::AssertUnwindSafe(f));
-                *their_packet.get() = Some(try_result);
-            }
+
+            thread_info::set(imp::guard::current(), their_thread);
+            let try_result = panic::catch_unwind(panic::AssertUnwindSafe(|| {
+                crate::sys_common::backtrace::__rust_begin_short_backtrace(f)
+            }));
+            *their_packet.get() = Some(try_result);
         };
 
         Ok(JoinHandle(JoinInner {
-            native: unsafe {
-                Some(imp::Thread::new(stack_size, Box::new(main))?)
-            },
+            // `imp::Thread::new` takes a closure with a `'static` lifetime, since it's passed
+            // through FFI or otherwise used with low-level threading primitives that have no
+            // notion of or way to enforce lifetimes.
+            //
+            // As mentioned in the `Safety` section of this function's documentation, the caller of
+            // this function needs to guarantee that the passed-in lifetime is sufficiently long
+            // for the lifetime of the thread.
+            //
+            // Similarly, the `sys` implementation must guarantee that no references to the closure
+            // exist after the thread has terminated, which is signaled by `Thread::join`
+            // returning.
+            native: Some(imp::Thread::new(
+                stack_size,
+                mem::transmute::<Box<dyn FnOnce() + 'a>, Box<dyn FnOnce() + 'static>>(Box::new(
+                    main,
+                )),
+            )?),
             thread: my_thread,
             packet: Packet(my_packet),
         }))
@@ -533,10 +610,13 @@ impl Builder {
 /// [`Send`]: ../../std/marker/trait.Send.html
 /// [`Sync`]: ../../std/marker/trait.Sync.html
 #[stable(feature = "rust1", since = "1.0.0")]
-pub fn spawn<F, T>(f: F) -> JoinHandle<T> where
-    F: FnOnce() -> T, F: Send + 'static, T: Send + 'static
+pub fn spawn<F, T>(f: F) -> JoinHandle<T>
+where
+    F: FnOnce() -> T,
+    F: Send + 'static,
+    T: Send + 'static,
 {
-    Builder::new().spawn(f).unwrap()
+    Builder::new().spawn(f).expect("failed to spawn thread")
 }
 
 /// Gets a handle to the thread that invokes it.
@@ -560,9 +640,11 @@ pub fn spawn<F, T>(f: F) -> JoinHandle<T> where
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub fn current() -> Thread {
-    thread_info::current_thread().expect("use of std::thread::current() is not \
+    thread_info::current_thread().expect(
+        "use of std::thread::current() is not \
                                           possible after the thread's local \
-                                          data has been destroyed")
+                                          data has been destroyed",
+    )
 }
 
 /// Cooperatively gives up a timeslice to the OS scheduler.
@@ -576,7 +658,7 @@ pub fn current() -> Thread {
 /// Thus the pattern of `yield`ing after a failed poll is rather common when
 /// implementing low-level shared resources or synchronization primitives.
 ///
-/// However programmers will usually prefer to use, [`channel`]s, [`Condvar`]s,
+/// However programmers will usually prefer to use [`channel`]s, [`Condvar`]s,
 /// [`Mutex`]es or [`join`] for their synchronization routines, as they avoid
 /// thinking about thread scheduling.
 ///
@@ -611,7 +693,7 @@ pub fn yield_now() {
 /// already poison themselves when a thread panics while holding the lock.
 ///
 /// This can also be used in multithreaded applications, in order to send a
-/// message to other threads warning that a thread has panicked (e.g. for
+/// message to other threads warning that a thread has panicked (e.g., for
 /// monitoring purposes).
 ///
 /// # Examples
@@ -650,15 +732,17 @@ pub fn panicking() -> bool {
     panicking::panicking()
 }
 
-/// Puts the current thread to sleep for the specified amount of time.
+/// Puts the current thread to sleep for at least the specified amount of time.
 ///
 /// The thread may sleep longer than the duration specified due to scheduling
-/// specifics or platform-dependent functionality.
+/// specifics or platform-dependent functionality. It will never sleep less.
 ///
 /// # Platform-specific behavior
 ///
-/// On Unix platforms this function will not return early due to a
-/// signal being received or a spurious wakeup.
+/// On Unix platforms, the underlying syscall may be interrupted by a
+/// spurious wakeup or signal handler. To ensure the sleep occurs for at least
+/// the specified duration, this function may invoke that system call multiple
+/// times.
 ///
 /// # Examples
 ///
@@ -674,17 +758,19 @@ pub fn sleep_ms(ms: u32) {
     sleep(Duration::from_millis(ms as u64))
 }
 
-/// Puts the current thread to sleep for the specified amount of time.
+/// Puts the current thread to sleep for at least the specified amount of time.
 ///
 /// The thread may sleep longer than the duration specified due to scheduling
-/// specifics or platform-dependent functionality.
+/// specifics or platform-dependent functionality. It will never sleep less.
 ///
 /// # Platform-specific behavior
 ///
-/// On Unix platforms this function will not return early due to a
-/// signal being received or a spurious wakeup. Platforms which do not support
-/// nanosecond precision for sleeping will have `dur` rounded up to the nearest
-/// granularity of time they can sleep for.
+/// On Unix platforms, the underlying syscall may be interrupted by a
+/// spurious wakeup or signal handler. To ensure the sleep occurs for at least
+/// the specified duration, this function may invoke that system call multiple
+/// times.
+/// Platforms which do not support nanosecond precision for sleeping will
+/// have `dur` rounded up to the nearest granularity of time they can sleep for.
 ///
 /// # Examples
 ///
@@ -737,9 +823,14 @@ const NOTIFIED: usize = 2;
 /// In other words, each [`Thread`] acts a bit like a spinlock that can be
 /// locked and unlocked using `park` and `unpark`.
 ///
+/// Notice that being unblocked does not imply any synchronization with someone
+/// that unparked this thread, it could also be spurious.
+/// For example, it would be a valid, but inefficient, implementation to make both [`park`] and
+/// [`unpark`] return immediately without doing anything.
+///
 /// The API is typically used by acquiring a handle to the current thread,
 /// placing that handle in a shared data structure so that other threads can
-/// find it, and then `park`ing. When some desired condition is met, another
+/// find it, and then `park`ing in a loop. When some desired condition is met, another
 /// thread calls [`unpark`] on the handle.
 ///
 /// The motivation for this design is twofold:
@@ -754,21 +845,33 @@ const NOTIFIED: usize = 2;
 ///
 /// ```
 /// use std::thread;
+/// use std::sync::{Arc, atomic::{Ordering, AtomicBool}};
 /// use std::time::Duration;
 ///
-/// let parked_thread = thread::Builder::new()
-///     .spawn(|| {
+/// let flag = Arc::new(AtomicBool::new(false));
+/// let flag2 = Arc::clone(&flag);
+///
+/// let parked_thread = thread::spawn(move || {
+///     // We want to wait until the flag is set. We *could* just spin, but using
+///     // park/unpark is more efficient.
+///     while !flag2.load(Ordering::Acquire) {
 ///         println!("Parking thread");
 ///         thread::park();
+///         // We *could* get here spuriously, i.e., way before the 10ms below are over!
+///         // But that is no problem, we are in a loop until the flag is set anyway.
 ///         println!("Thread unparked");
-///     })
-///     .unwrap();
+///     }
+///     println!("Flag received");
+/// });
 ///
 /// // Let some time pass for the thread to be spawned.
 /// thread::sleep(Duration::from_millis(10));
 ///
+/// // Set the flag, and let the thread wake up.
 /// // There is no race condition here, if `unpark`
 /// // happens first, `park` will return immediately.
+/// // Hence there is no risk of a deadlock.
+/// flag.store(true, Ordering::Release);
 /// println!("Unpark the thread");
 /// parked_thread.thread().unpark();
 ///
@@ -792,7 +895,7 @@ pub fn park() {
     // If we were previously notified then we consume this notification and
     // return quickly.
     if thread.inner.state.compare_exchange(NOTIFIED, EMPTY, SeqCst, SeqCst).is_ok() {
-        return
+        return;
     }
 
     // Otherwise we need to coordinate going to sleep
@@ -800,7 +903,14 @@ pub fn park() {
     match thread.inner.state.compare_exchange(EMPTY, PARKED, SeqCst, SeqCst) {
         Ok(_) => {}
         Err(NOTIFIED) => {
-            thread.inner.state.store(EMPTY, SeqCst);
+            // We must read here, even though we know it will be `NOTIFIED`.
+            // This is because `unpark` may have been called again since we read
+            // `NOTIFIED` in the `compare_exchange` above. We must perform an
+            // acquire operation that synchronizes with that `unpark` to observe
+            // any writes it made before the call to unpark. To do that we must
+            // read from the write it made to `state`.
+            let old = thread.inner.state.swap(EMPTY, SeqCst);
+            assert_eq!(old, NOTIFIED, "park state changed unexpectedly");
             return;
         } // should consume this notification, so prohibit spurious wakeups in next park.
         Err(_) => panic!("inconsistent park state"),
@@ -809,7 +919,7 @@ pub fn park() {
         m = thread.inner.cvar.wait(m).unwrap();
         match thread.inner.state.compare_exchange(NOTIFIED, EMPTY, SeqCst, SeqCst) {
             Ok(_) => return, // got a notification
-            Err(_) => {} // spurious wakeup, go back to sleep
+            Err(_) => {}     // spurious wakeup, go back to sleep
         }
     }
 }
@@ -883,13 +993,15 @@ pub fn park_timeout(dur: Duration) {
     // afterwards we start coordinating for a sleep.
     // return quickly.
     if thread.inner.state.compare_exchange(NOTIFIED, EMPTY, SeqCst, SeqCst).is_ok() {
-        return
+        return;
     }
     let m = thread.inner.lock.lock().unwrap();
     match thread.inner.state.compare_exchange(EMPTY, PARKED, SeqCst, SeqCst) {
         Ok(_) => {}
         Err(NOTIFIED) => {
-            thread.inner.state.store(EMPTY, SeqCst);
+            // We must read again here, see `park`.
+            let old = thread.inner.state.swap(EMPTY, SeqCst);
+            assert_eq!(old, NOTIFIED, "park state changed unexpectedly");
             return;
         } // should consume this notification, so prohibit spurious wakeups in next park.
         Err(_) => panic!("inconsistent park_timeout state"),
@@ -902,7 +1014,7 @@ pub fn park_timeout(dur: Duration) {
     let (_m, _result) = thread.inner.cvar.wait_timeout(m, dur).unwrap();
     match thread.inner.state.swap(EMPTY, SeqCst) {
         NOTIFIED => {} // got a notification, hurray!
-        PARKED => {} // no notification, alas
+        PARKED => {}   // no notification, alas
         n => panic!("inconsistent park_timeout state: {}", n),
     }
 }
@@ -935,7 +1047,7 @@ pub fn park_timeout(dur: Duration) {
 /// [`Thread`]: ../../std/thread/struct.Thread.html
 #[stable(feature = "thread_id", since = "1.19.0")]
 #[derive(Eq, PartialEq, Clone, Copy, Hash, Debug)]
-pub struct ThreadId(u64);
+pub struct ThreadId(NonZeroU64);
 
 impl ThreadId {
     // Generate a new unique thread ID.
@@ -943,21 +1055,21 @@ impl ThreadId {
         // We never call `GUARD.init()`, so it is UB to attempt to
         // acquire this mutex reentrantly!
         static GUARD: mutex::Mutex = mutex::Mutex::new();
-        static mut COUNTER: u64 = 0;
+        static mut COUNTER: u64 = 1;
 
         unsafe {
             let _guard = GUARD.lock();
 
             // If we somehow use up all our bits, panic so that we're not
             // covering up subtle bugs of IDs being reused.
-            if COUNTER == ::u64::MAX {
+            if COUNTER == crate::u64::MAX {
                 panic!("failed to generate unique thread ID: bitspace exhausted");
             }
 
             let id = COUNTER;
             COUNTER += 1;
 
-            ThreadId(id)
+            ThreadId(NonZeroU64::new(id).unwrap())
         }
     }
 }
@@ -968,7 +1080,7 @@ impl ThreadId {
 
 /// The internal representation of a `Thread` handle
 struct Inner {
-    name: Option<CString>,      // Guaranteed to be UTF-8
+    name: Option<CString>, // Guaranteed to be UTF-8
     id: ThreadId,
 
     // state for thread park/unpark
@@ -984,7 +1096,7 @@ struct Inner {
 /// Threads are represented via the `Thread` type, which you can get in one of
 /// two ways:
 ///
-/// * By spawning a new thread, e.g. using the [`thread::spawn`][`spawn`]
+/// * By spawning a new thread, e.g., using the [`thread::spawn`][`spawn`]
 ///   function, and calling [`thread`][`JoinHandle::thread`] on the
 ///   [`JoinHandle`].
 /// * By requesting the current thread, using the [`thread::current`] function.
@@ -1010,9 +1122,8 @@ impl Thread {
     // Used only internally to construct a thread object without spawning
     // Panics if the name contains nuls.
     pub(crate) fn new(name: Option<String>) -> Thread {
-        let cname = name.map(|n| {
-            CString::new(n).expect("thread name may not contain interior null bytes")
-        });
+        let cname =
+            name.map(|n| CString::new(n).expect("thread name may not contain interior null bytes"));
         Thread {
             inner: Arc::new(Inner {
                 name: cname,
@@ -1020,7 +1131,7 @@ impl Thread {
                 state: AtomicUsize::new(EMPTY),
                 lock: Mutex::new(()),
                 cvar: Condvar::new(),
-            })
+            }),
         }
     }
 
@@ -1058,23 +1169,32 @@ impl Thread {
     /// [park]: fn.park.html
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn unpark(&self) {
-        loop {
-            match self.inner.state.compare_exchange(EMPTY, NOTIFIED, SeqCst, SeqCst) {
-                Ok(_) => return, // no one was waiting
-                Err(NOTIFIED) => return, // already unparked
-                Err(PARKED) => {} // gotta go wake someone up
-                _ => panic!("inconsistent state in unpark"),
-            }
-
-            // Coordinate wakeup through the mutex and a condvar notification
-            let _lock = self.inner.lock.lock().unwrap();
-            match self.inner.state.compare_exchange(PARKED, NOTIFIED, SeqCst, SeqCst) {
-                Ok(_) => return self.inner.cvar.notify_one(),
-                Err(NOTIFIED) => return, // a different thread unparked
-                Err(EMPTY) => {} // parked thread went away, try again
-                _ => panic!("inconsistent state in unpark"),
-            }
+        // To ensure the unparked thread will observe any writes we made
+        // before this call, we must perform a release operation that `park`
+        // can synchronize with. To do that we must write `NOTIFIED` even if
+        // `state` is already `NOTIFIED`. That is why this must be a swap
+        // rather than a compare-and-swap that returns if it reads `NOTIFIED`
+        // on failure.
+        match self.inner.state.swap(NOTIFIED, SeqCst) {
+            EMPTY => return,    // no one was waiting
+            NOTIFIED => return, // already unparked
+            PARKED => {}        // gotta go wake someone up
+            _ => panic!("inconsistent state in unpark"),
         }
+
+        // There is a period between when the parked thread sets `state` to
+        // `PARKED` (or last checked `state` in the case of a spurious wake
+        // up) and when it actually waits on `cvar`. If we were to notify
+        // during this period it would be ignored and then when the parked
+        // thread went to sleep it would never wake up. Fortunately, it has
+        // `lock` locked at this stage so we can acquire `lock` to wait until
+        // it is ready to receive the notification.
+        //
+        // Releasing `lock` before the call to `notify_one` means that when the
+        // parked thread wakes it doesn't get woken only to have to wait for us
+        // to release `lock`.
+        drop(self.inner.lock.lock().unwrap());
+        self.inner.cvar.notify_one()
     }
 
     /// Gets the thread's unique identifier.
@@ -1135,7 +1255,7 @@ impl Thread {
     /// [naming-threads]: ./index.html#naming-threads
     #[stable(feature = "rust1", since = "1.0.0")]
     pub fn name(&self) -> Option<&str> {
-        self.cname().map(|s| unsafe { str::from_utf8_unchecked(s.to_bytes()) } )
+        self.cname().map(|s| unsafe { str::from_utf8_unchecked(s.to_bytes()) })
     }
 
     fn cname(&self) -> Option<&CStr> {
@@ -1145,8 +1265,8 @@ impl Thread {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl fmt::Debug for Thread {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(&self.name(), f)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Thread").field("id", &self.id()).field("name", &self.name()).finish()
     }
 }
 
@@ -1157,6 +1277,18 @@ impl fmt::Debug for Thread {
 /// A specialized [`Result`] type for threads.
 ///
 /// Indicates the manner in which a thread exited.
+///
+/// The value contained in the `Result::Err` variant
+/// is the value the thread panicked with;
+/// that is, the argument the `panic!` macro was called with.
+/// Unlike with normal errors, this value doesn't implement
+/// the [`Error`](crate::error::Error) trait.
+///
+/// Thus, a sensible way to handle a thread panic is to either:
+/// 1. `unwrap` the `Result<T>`, propagating the panic
+/// 2. or in case the thread is intended to be a subsystem boundary
+/// that is supposed to isolate system-level failures,
+/// match on the `Err` variant and handle the panic in an appropriate way.
 ///
 /// A thread that completes without panicking is considered to exit successfully.
 ///
@@ -1180,7 +1312,7 @@ impl fmt::Debug for Thread {
 ///
 /// [`Result`]: ../../std/result/enum.Result.html
 #[stable(feature = "rust1", since = "1.0.0")]
-pub type Result<T> = ::result::Result<T, Box<dyn Any + Send + 'static>>;
+pub type Result<T> = crate::result::Result<T, Box<dyn Any + Send + 'static>>;
 
 // This packet is used to communicate the return value between the child thread
 // and the parent thread. Memory is shared through the `Arc` within and there's
@@ -1209,9 +1341,7 @@ struct JoinInner<T> {
 impl<T> JoinInner<T> {
     fn join(&mut self) -> Result<T> {
         self.native.take().unwrap().join();
-        unsafe {
-            (*self.packet.0.get()).take().unwrap()
-        }
+        unsafe { (*self.packet.0.get()).take().unwrap() }
     }
 }
 
@@ -1310,11 +1440,17 @@ impl<T> JoinHandle<T> {
 
     /// Waits for the associated thread to finish.
     ///
+    /// In terms of [atomic memory orderings],  the completion of the associated
+    /// thread synchronizes with this function returning. In other words, all
+    /// operations performed by that thread are ordered before all
+    /// operations that happen after `join` returns.
+    ///
     /// If the child thread panics, [`Err`] is returned with the parameter given
     /// to [`panic`].
     ///
     /// [`Err`]: ../../std/result/enum.Result.html#variant.Err
     /// [`panic`]: ../../std/macro.panic.html
+    /// [atomic memory orderings]: ../../std/sync/atomic/index.html
     ///
     /// # Panics
     ///
@@ -1340,16 +1476,20 @@ impl<T> JoinHandle<T> {
 }
 
 impl<T> AsInner<imp::Thread> for JoinHandle<T> {
-    fn as_inner(&self) -> &imp::Thread { self.0.native.as_ref().unwrap() }
+    fn as_inner(&self) -> &imp::Thread {
+        self.0.native.as_ref().unwrap()
+    }
 }
 
 impl<T> IntoInner<imp::Thread> for JoinHandle<T> {
-    fn into_inner(self) -> imp::Thread { self.0.native.unwrap() }
+    fn into_inner(self) -> imp::Thread {
+        self.0.native.unwrap()
+    }
 }
 
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl<T> fmt::Debug for JoinHandle<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("JoinHandle { .. }")
     }
 }
@@ -1366,29 +1506,38 @@ fn _assert_sync_and_send() {
 
 #[cfg(all(test, not(target_os = "emscripten")))]
 mod tests {
-    use any::Any;
-    use sync::mpsc::{channel, Sender};
-    use result;
-    use super::{Builder};
-    use thread;
-    use time::Duration;
-    use u32;
+    use super::Builder;
+    use crate::any::Any;
+    use crate::mem;
+    use crate::result;
+    use crate::sync::mpsc::{channel, Sender};
+    use crate::thread::{self, ThreadId};
+    use crate::time::Duration;
+    use crate::u32;
 
     // !!! These tests are dangerous. If something is buggy, they will hang, !!!
     // !!! instead of exiting cleanly. This might wedge the buildbots.       !!!
 
     #[test]
     fn test_unnamed_thread() {
-        thread::spawn(move|| {
+        thread::spawn(move || {
             assert!(thread::current().name().is_none());
-        }).join().ok().unwrap();
+        })
+        .join()
+        .ok()
+        .expect("thread panicked");
     }
 
     #[test]
     fn test_named_thread() {
-        Builder::new().name("ada lovelace".to_string()).spawn(move|| {
-            assert!(thread::current().name().unwrap() == "ada lovelace".to_string());
-        }).unwrap().join().unwrap();
+        Builder::new()
+            .name("ada lovelace".to_string())
+            .spawn(move || {
+                assert!(thread::current().name().unwrap() == "ada lovelace".to_string());
+            })
+            .unwrap()
+            .join()
+            .unwrap();
     }
 
     #[test]
@@ -1400,7 +1549,7 @@ mod tests {
     #[test]
     fn test_run_basic() {
         let (tx, rx) = channel();
-        thread::spawn(move|| {
+        thread::spawn(move || {
             tx.send(()).unwrap();
         });
         rx.recv().unwrap();
@@ -1408,11 +1557,9 @@ mod tests {
 
     #[test]
     fn test_join_panic() {
-        match thread::spawn(move|| {
-            panic!()
-        }).join() {
+        match thread::spawn(move || panic!()).join() {
             result::Result::Err(_) => (),
-            result::Result::Ok(()) => panic!()
+            result::Result::Ok(()) => panic!(),
         }
     }
 
@@ -1422,14 +1569,13 @@ mod tests {
 
         fn f(i: i32, tx: Sender<()>) {
             let tx = tx.clone();
-            thread::spawn(move|| {
+            thread::spawn(move || {
                 if i == 0 {
                     tx.send(()).unwrap();
                 } else {
                     f(i - 1, tx);
                 }
             });
-
         }
         f(10, tx);
         rx.recv().unwrap();
@@ -1439,8 +1585,8 @@ mod tests {
     fn test_spawn_sched_childs_on_default_sched() {
         let (tx, rx) = channel();
 
-        thread::spawn(move|| {
-            thread::spawn(move|| {
+        thread::spawn(move || {
+            thread::spawn(move || {
                 tx.send(()).unwrap();
             });
         });
@@ -1448,13 +1594,16 @@ mod tests {
         rx.recv().unwrap();
     }
 
-    fn avoid_copying_the_body<F>(spawnfn: F) where F: FnOnce(Box<dyn Fn() + Send>) {
+    fn avoid_copying_the_body<F>(spawnfn: F)
+    where
+        F: FnOnce(Box<dyn Fn() + Send>),
+    {
         let (tx, rx) = channel();
 
         let x: Box<_> = box 1;
         let x_in_parent = (&*x) as *const i32 as usize;
 
-        spawnfn(Box::new(move|| {
+        spawnfn(Box::new(move || {
             let x_in_child = (&*x) as *const i32 as usize;
             tx.send(x_in_child).unwrap();
         }));
@@ -1473,7 +1622,7 @@ mod tests {
     #[test]
     fn test_avoid_copying_the_body_thread_spawn() {
         avoid_copying_the_body(|f| {
-            thread::spawn(move|| {
+            thread::spawn(move || {
                 f();
             });
         })
@@ -1482,9 +1631,7 @@ mod tests {
     #[test]
     fn test_avoid_copying_the_body_join() {
         avoid_copying_the_body(|f| {
-            let _ = thread::spawn(move|| {
-                f()
-            }).join();
+            let _ = thread::spawn(move || f()).join();
         })
     }
 
@@ -1496,9 +1643,9 @@ mod tests {
         // valgrind-friendly. try this at home, instead..!)
         const GENERATIONS: u32 = 16;
         fn child_no(x: u32) -> Box<dyn Fn() + Send> {
-            return Box::new(move|| {
+            return Box::new(move || {
                 if x < GENERATIONS {
-                    thread::spawn(move|| child_no(x+1)());
+                    thread::spawn(move || child_no(x + 1)());
                 }
             });
         }
@@ -1512,37 +1659,43 @@ mod tests {
 
     #[test]
     fn test_try_panic_message_static_str() {
-        match thread::spawn(move|| {
+        match thread::spawn(move || {
             panic!("static string");
-        }).join() {
+        })
+        .join()
+        {
             Err(e) => {
                 type T = &'static str;
                 assert!(e.is::<T>());
                 assert_eq!(*e.downcast::<T>().unwrap(), "static string");
             }
-            Ok(()) => panic!()
+            Ok(()) => panic!(),
         }
     }
 
     #[test]
     fn test_try_panic_message_owned_str() {
-        match thread::spawn(move|| {
+        match thread::spawn(move || {
             panic!("owned string".to_string());
-        }).join() {
+        })
+        .join()
+        {
             Err(e) => {
                 type T = String;
                 assert!(e.is::<T>());
                 assert_eq!(*e.downcast::<T>().unwrap(), "owned string".to_string());
             }
-            Ok(()) => panic!()
+            Ok(()) => panic!(),
         }
     }
 
     #[test]
     fn test_try_panic_message_any() {
-        match thread::spawn(move|| {
+        match thread::spawn(move || {
             panic!(box 413u16 as Box<dyn Any + Send>);
-        }).join() {
+        })
+        .join()
+        {
             Err(e) => {
                 type T = Box<dyn Any + Send>;
                 assert!(e.is::<T>());
@@ -1550,7 +1703,7 @@ mod tests {
                 assert!(any.is::<u16>());
                 assert_eq!(*any.downcast::<u16>().unwrap(), 413);
             }
-            Ok(()) => panic!()
+            Ok(()) => panic!(),
         }
     }
 
@@ -1558,11 +1711,9 @@ mod tests {
     fn test_try_panic_message_unit_struct() {
         struct Juju;
 
-        match thread::spawn(move|| {
-            panic!(Juju)
-        }).join() {
+        match thread::spawn(move || panic!(Juju)).join() {
             Err(ref e) if e.is::<Juju>() => {}
-            Err(_) | Ok(()) => panic!()
+            Err(_) | Ok(()) => panic!(),
         }
     }
 
@@ -1575,6 +1726,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(target_env = "sgx", ignore)] // FIXME: https://github.com/fortanix/rust-sgx/issues/31
     fn test_park_timeout_unpark_not_called() {
         for _ in 0..10 {
             thread::park_timeout(Duration::from_millis(10));
@@ -1582,6 +1734,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(target_env = "sgx", ignore)] // FIXME: https://github.com/fortanix/rust-sgx/issues/31
     fn test_park_timeout_unpark_called_other_thread() {
         for _ in 0..10 {
             let th = thread::current();
@@ -1596,8 +1749,14 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(target_env = "sgx", ignore)] // FIXME: https://github.com/fortanix/rust-sgx/issues/31
     fn sleep_ms_smoke() {
         thread::sleep(Duration::from_millis(2));
+    }
+
+    #[test]
+    fn test_size_of_option_thread_id() {
+        assert_eq!(mem::size_of::<Option<ThreadId>>(), mem::size_of::<ThreadId>());
     }
 
     #[test]
@@ -1611,6 +1770,6 @@ mod tests {
         assert!(thread::current().id() != spawned_id);
     }
 
-    // NOTE: the corresponding test for stderr is in run-pass/thread-stderr, due
+    // NOTE: the corresponding test for stderr is in ui/thread-stderr, due
     // to the test harness apparently interfering with stderr configuration.
 }

@@ -1,89 +1,92 @@
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:19:13
+error[E0507]: cannot move out of `*a` which is behind a shared reference
+  --> $DIR/move-errors.rs:6:13
    |
 LL |     let b = *a;
    |             ^^
    |             |
-   |             cannot move out of borrowed content
-   |             help: consider removing this dereference operator: `a`
+   |             move occurs because `*a` has type `A`, which does not implement the `Copy` trait
+   |             help: consider borrowing here: `&*a`
 
 error[E0508]: cannot move out of type `[A; 1]`, a non-copy array
-  --> $DIR/move-errors.rs:25:13
+  --> $DIR/move-errors.rs:12:13
    |
 LL |     let b = a[0];
    |             ^^^^
    |             |
    |             cannot move out of here
-   |             help: consider using a reference instead: `&a[0]`
+   |             move occurs because `a[_]` has type `A`, which does not implement the `Copy` trait
+   |             help: consider borrowing here: `&a[0]`
 
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:32:13
+error[E0507]: cannot move out of `**r` which is behind a shared reference
+  --> $DIR/move-errors.rs:19:13
    |
 LL |     let s = **r;
    |             ^^^
    |             |
-   |             cannot move out of borrowed content
-   |             help: consider using a reference instead: `&**r`
+   |             move occurs because `**r` has type `A`, which does not implement the `Copy` trait
+   |             help: consider borrowing here: `&**r`
 
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:40:13
+error[E0507]: cannot move out of an `Rc`
+  --> $DIR/move-errors.rs:27:13
    |
 LL |     let s = *r;
    |             ^^
    |             |
-   |             cannot move out of borrowed content
-   |             help: consider using a reference instead: `&*r`
+   |             move occurs because value has type `A`, which does not implement the `Copy` trait
+   |             help: consider borrowing here: `&*r`
 
 error[E0508]: cannot move out of type `[A; 1]`, a non-copy array
-  --> $DIR/move-errors.rs:45:13
+  --> $DIR/move-errors.rs:32:13
    |
 LL |     let a = [A("".to_string())][0];
    |             ^^^^^^^^^^^^^^^^^^^^^^
    |             |
    |             cannot move out of here
-   |             help: consider using a reference instead: `&[A("".to_string())][0]`
+   |             move occurs because value has type `A`, which does not implement the `Copy` trait
+   |             help: consider borrowing here: `&[A("".to_string())][0]`
 
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:51:16
+error[E0507]: cannot move out of `a.0` which is behind a shared reference
+  --> $DIR/move-errors.rs:38:16
    |
 LL |     let A(s) = *a;
-   |           -    ^^
-   |           |    |
-   |           |    cannot move out of borrowed content
-   |           |    help: consider removing this dereference operator: `a`
-   |           move occurs because s has type `std::string::String`, which does not implement the `Copy` trait
+   |           -    ^^ help: consider borrowing here: `&*a`
+   |           |
+   |           data moved here
+   |           move occurs because `s` has type `std::string::String`, which does not implement the `Copy` trait
 
 error[E0509]: cannot move out of type `D`, which implements the `Drop` trait
-  --> $DIR/move-errors.rs:57:19
+  --> $DIR/move-errors.rs:44:19
    |
 LL |     let C(D(s)) = c;
    |             -     ^ cannot move out of here
    |             |
    |             data moved here
-   |             help: to prevent move, use ref or ref mut: `ref s`
+   |             move occurs because `s` has type `std::string::String`, which does not implement the `Copy` trait
 
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:64:9
+error[E0507]: cannot move out of `*a` which is behind a shared reference
+  --> $DIR/move-errors.rs:51:9
    |
 LL |     b = *a;
-   |         ^^ cannot move out of borrowed content
+   |         ^^ move occurs because `*a` has type `A`, which does not implement the `Copy` trait
 
 error[E0508]: cannot move out of type `[B; 1]`, a non-copy array
-  --> $DIR/move-errors.rs:87:11
+  --> $DIR/move-errors.rs:74:11
    |
 LL |     match x[0] {
    |           ^^^^
    |           |
    |           cannot move out of here
-   |           help: consider using a reference instead: `&x[0]`
-LL |     //~^ ERROR
+   |           help: consider borrowing here: `&x[0]`
+LL |
 LL |         B::U(d) => (),
-   |              - move occurs because d has type `D`, which does not implement the `Copy` trait
+   |              - data moved here
 LL |         B::V(s) => (),
-   |              - move occurs because s has type `std::string::String`, which does not implement the `Copy` trait
+   |              - ...and here
+   |
+   = note: move occurs because these variables have types that don't implement the `Copy` trait
 
 error[E0509]: cannot move out of type `D`, which implements the `Drop` trait
-  --> $DIR/move-errors.rs:96:11
+  --> $DIR/move-errors.rs:83:11
    |
 LL |     match x {
    |           ^ cannot move out of here
@@ -92,10 +95,10 @@ LL |         B::U(D(s)) => (),
    |                -
    |                |
    |                data moved here
-   |                help: to prevent move, use ref or ref mut: `ref s`
+   |                move occurs because `s` has type `std::string::String`, which does not implement the `Copy` trait
 
 error[E0509]: cannot move out of type `D`, which implements the `Drop` trait
-  --> $DIR/move-errors.rs:105:11
+  --> $DIR/move-errors.rs:92:11
    |
 LL |     match x {
    |           ^ cannot move out of here
@@ -104,48 +107,46 @@ LL |         (D(s), &t) => (),
    |            -
    |            |
    |            data moved here
-   |            help: to prevent move, use ref or ref mut: `ref s`
+   |            move occurs because `s` has type `std::string::String`, which does not implement the `Copy` trait
 
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:105:11
+error[E0507]: cannot move out of `*x.1` which is behind a shared reference
+  --> $DIR/move-errors.rs:92:11
    |
 LL |     match x {
-   |           ^ cannot move out of borrowed content
+   |           ^
 ...
 LL |         (D(s), &t) => (),
    |                 -
    |                 |
    |                 data moved here
-   |                 help: to prevent move, use ref or ref mut: `ref t`
+   |                 move occurs because `t` has type `std::string::String`, which does not implement the `Copy` trait
 
 error[E0509]: cannot move out of type `F`, which implements the `Drop` trait
-  --> $DIR/move-errors.rs:115:11
+  --> $DIR/move-errors.rs:102:11
    |
 LL |     match x {
    |           ^ cannot move out of here
-LL |     //~^ ERROR
+LL |
 LL |         F(s, mut t) => (),
-   |           -  ----- ... and here
+   |           -  ----- ...and here
    |           |
    |           data moved here
-help: to prevent move, use ref or ref mut
    |
-LL |         F(ref s, ref mut t) => (),
-   |           ^^^^^  ^^^^^^^^^
+   = note: move occurs because these variables have types that don't implement the `Copy` trait
 
-error[E0507]: cannot move out of borrowed content
-  --> $DIR/move-errors.rs:123:11
+error[E0507]: cannot move out of `x.0` which is behind a shared reference
+  --> $DIR/move-errors.rs:110:11
    |
 LL |     match *x {
-   |           ^^
-   |           |
-   |           cannot move out of borrowed content
-   |           help: consider removing this dereference operator: `x`
-LL |     //~^ ERROR
+   |           ^^ help: consider borrowing here: `&*x`
+LL |
 LL |         Ok(s) | Err(s) => (),
-   |            - move occurs because s has type `std::string::String`, which does not implement the `Copy` trait
+   |            -
+   |            |
+   |            data moved here
+   |            move occurs because `s` has type `std::string::String`, which does not implement the `Copy` trait
 
 error: aborting due to 14 previous errors
 
-Some errors occurred: E0507, E0508, E0509.
+Some errors have detailed explanations: E0507, E0508, E0509.
 For more information about an error, try `rustc --explain E0507`.

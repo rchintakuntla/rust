@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Inspection and manipulation of the process's environment.
 //!
 //! This module contains functions to inspect various aspects such as
@@ -16,20 +6,20 @@
 //!
 //! There are several functions and structs in this module that have a
 //! counterpart ending in `os`. Those ending in `os` will return an [`OsString`]
-//! and those without will be returning a [`String`].
+//! and those without will return a [`String`].
 //!
 //! [`OsString`]: ../../std/ffi/struct.OsString.html
 //! [`String`]: ../string/struct.String.html
 
 #![stable(feature = "env", since = "1.0.0")]
 
-use error::Error;
-use ffi::{OsStr, OsString};
-use fmt;
-use io;
-use path::{Path, PathBuf};
-use sys;
-use sys::os as os_imp;
+use crate::error::Error;
+use crate::ffi::{OsStr, OsString};
+use crate::fmt;
+use crate::io;
+use crate::path::{Path, PathBuf};
+use crate::sys;
+use crate::sys::os as os_imp;
 
 /// Returns the current working directory as a [`PathBuf`].
 ///
@@ -88,7 +78,9 @@ pub fn set_current_dir<P: AsRef<Path>>(path: P) -> io::Result<()> {
 ///
 /// [`std::env::vars`]: fn.vars.html
 #[stable(feature = "env", since = "1.0.0")]
-pub struct Vars { inner: VarsOs }
+pub struct Vars {
+    inner: VarsOs,
+}
 
 /// An iterator over a snapshot of the environment variables of this process.
 ///
@@ -97,7 +89,9 @@ pub struct Vars { inner: VarsOs }
 ///
 /// [`std::env::vars_os`]: fn.vars_os.html
 #[stable(feature = "env", since = "1.0.0")]
-pub struct VarsOs { inner: os_imp::Env }
+pub struct VarsOs {
+    inner: os_imp::Env,
+}
 
 /// Returns an iterator of (variable, value) pairs of strings, for all the
 /// environment variables of the current process.
@@ -157,16 +151,16 @@ pub fn vars_os() -> VarsOs {
 impl Iterator for Vars {
     type Item = (String, String);
     fn next(&mut self) -> Option<(String, String)> {
-        self.inner.next().map(|(a, b)| {
-            (a.into_string().unwrap(), b.into_string().unwrap())
-        })
+        self.inner.next().map(|(a, b)| (a.into_string().unwrap(), b.into_string().unwrap()))
     }
-    fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for Vars {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("Vars { .. }")
     }
 }
@@ -174,13 +168,17 @@ impl fmt::Debug for Vars {
 #[stable(feature = "env", since = "1.0.0")]
 impl Iterator for VarsOs {
     type Item = (OsString, OsString);
-    fn next(&mut self) -> Option<(OsString, OsString)> { self.inner.next() }
-    fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+    fn next(&mut self) -> Option<(OsString, OsString)> {
+        self.inner.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for VarsOs {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("VarsOs { .. }")
     }
 }
@@ -191,6 +189,12 @@ impl fmt::Debug for VarsOs {
 ///
 /// * Environment variable is not present
 /// * Environment variable is not valid unicode
+///
+/// # Panics
+///
+/// This function may panic if `key` is empty, contains an ASCII equals sign
+/// `'='` or the NUL character `'\0'`, or when the value contains the NUL
+/// character.
 ///
 /// # Examples
 ///
@@ -220,6 +224,12 @@ fn _var(key: &OsStr) -> Result<String, VarError> {
 ///
 /// [`None`]: ../option/enum.Option.html#variant.None
 ///
+/// # Panics
+///
+/// This function may panic if `key` is empty, contains an ASCII equals sign
+/// `'='` or the NUL character `'\0'`, or when the value contains the NUL
+/// character.
+///
 /// # Examples
 ///
 /// ```
@@ -237,9 +247,8 @@ pub fn var_os<K: AsRef<OsStr>>(key: K) -> Option<OsString> {
 }
 
 fn _var_os(key: &OsStr) -> Option<OsString> {
-    os_imp::getenv(key).unwrap_or_else(|e| {
-        panic!("failed to get environment variable `{:?}`: {}", key, e)
-    })
+    os_imp::getenv(key)
+        .unwrap_or_else(|e| panic!("failed to get environment variable `{:?}`: {}", key, e))
 }
 
 /// The error type for operations interacting with environment variables.
@@ -263,7 +272,7 @@ pub enum VarError {
 
 #[stable(feature = "env", since = "1.0.0")]
 impl fmt::Display for VarError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             VarError::NotPresent => write!(f, "environment variable not found"),
             VarError::NotUnicode(ref s) => {
@@ -275,6 +284,7 @@ impl fmt::Display for VarError {
 
 #[stable(feature = "env", since = "1.0.0")]
 impl Error for VarError {
+    #[allow(deprecated)]
     fn description(&self) -> &str {
         match *self {
             VarError::NotPresent => "environment variable not found",
@@ -288,7 +298,7 @@ impl Error for VarError {
 ///
 /// Note that while concurrent access to environment variables is safe in Rust,
 /// some platforms only expose inherently unsafe non-threadsafe APIs for
-/// inspecting the environment. As a result extra care needs to be taken when
+/// inspecting the environment. As a result, extra care needs to be taken when
 /// auditing calls to unsafe external FFI functions to ensure that any external
 /// environment accesses are properly synchronized with accesses in Rust.
 ///
@@ -319,8 +329,7 @@ pub fn set_var<K: AsRef<OsStr>, V: AsRef<OsStr>>(k: K, v: V) {
 
 fn _set_var(k: &OsStr, v: &OsStr) {
     os_imp::setenv(k, v).unwrap_or_else(|e| {
-        panic!("failed to set environment variable `{:?}` to `{:?}`: {}",
-               k, v, e)
+        panic!("failed to set environment variable `{:?}` to `{:?}`: {}", k, v, e)
     })
 }
 
@@ -361,25 +370,30 @@ pub fn remove_var<K: AsRef<OsStr>>(k: K) {
 }
 
 fn _remove_var(k: &OsStr) {
-    os_imp::unsetenv(k).unwrap_or_else(|e| {
-        panic!("failed to remove environment variable `{:?}`: {}", k, e)
-    })
+    os_imp::unsetenv(k)
+        .unwrap_or_else(|e| panic!("failed to remove environment variable `{:?}`: {}", k, e))
 }
 
 /// An iterator that splits an environment variable into paths according to
 /// platform-specific conventions.
 ///
+/// The iterator element type is [`PathBuf`].
+///
 /// This structure is created by the [`std::env::split_paths`] function. See its
 /// documentation for more.
 ///
+/// [`PathBuf`]: ../../std/path/struct.PathBuf.html
 /// [`std::env::split_paths`]: fn.split_paths.html
 #[stable(feature = "env", since = "1.0.0")]
-pub struct SplitPaths<'a> { inner: os_imp::SplitPaths<'a> }
+pub struct SplitPaths<'a> {
+    inner: os_imp::SplitPaths<'a>,
+}
 
 /// Parses input according to platform conventions for the `PATH`
 /// environment variable.
 ///
-/// Returns an iterator over the paths contained in `unparsed`.
+/// Returns an iterator over the paths contained in `unparsed`. The iterator
+/// element type is [`PathBuf`].
 ///
 /// # Examples
 ///
@@ -396,21 +410,27 @@ pub struct SplitPaths<'a> { inner: os_imp::SplitPaths<'a> }
 ///     None => println!("{} is not defined in the environment.", key)
 /// }
 /// ```
+///
+/// [`PathBuf`]: ../../std/path/struct.PathBuf.html
 #[stable(feature = "env", since = "1.0.0")]
-pub fn split_paths<T: AsRef<OsStr> + ?Sized>(unparsed: &T) -> SplitPaths {
+pub fn split_paths<T: AsRef<OsStr> + ?Sized>(unparsed: &T) -> SplitPaths<'_> {
     SplitPaths { inner: os_imp::split_paths(unparsed.as_ref()) }
 }
 
 #[stable(feature = "env", since = "1.0.0")]
 impl<'a> Iterator for SplitPaths<'a> {
     type Item = PathBuf;
-    fn next(&mut self) -> Option<PathBuf> { self.inner.next() }
-    fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+    fn next(&mut self) -> Option<PathBuf> {
+        self.inner.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 #[stable(feature = "std_debug", since = "1.16.0")]
-impl<'a> fmt::Debug for SplitPaths<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+impl fmt::Debug for SplitPaths<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.pad("SplitPaths { .. }")
     }
 }
@@ -422,7 +442,7 @@ impl<'a> fmt::Debug for SplitPaths<'a> {
 #[derive(Debug)]
 #[stable(feature = "env", since = "1.0.0")]
 pub struct JoinPathsError {
-    inner: os_imp::JoinPathsError
+    inner: os_imp::JoinPathsError,
 }
 
 /// Joins a collection of [`Path`]s appropriately for the `PATH`
@@ -469,7 +489,7 @@ pub struct JoinPathsError {
 /// # }
 /// ```
 ///
-/// Using `env::join_paths` with `env::spit_paths` to append an item to the `PATH` environment
+/// Using `env::join_paths` with [`env::split_paths`] to append an item to the `PATH` environment
 /// variable:
 ///
 /// ```
@@ -487,25 +507,30 @@ pub struct JoinPathsError {
 ///     Ok(())
 /// }
 /// ```
+///
+/// [`env::split_paths`]: fn.split_paths.html
 #[stable(feature = "env", since = "1.0.0")]
 pub fn join_paths<I, T>(paths: I) -> Result<OsString, JoinPathsError>
-    where I: IntoIterator<Item=T>, T: AsRef<OsStr>
+where
+    I: IntoIterator<Item = T>,
+    T: AsRef<OsStr>,
 {
-    os_imp::join_paths(paths.into_iter()).map_err(|e| {
-        JoinPathsError { inner: e }
-    })
+    os_imp::join_paths(paths.into_iter()).map_err(|e| JoinPathsError { inner: e })
 }
 
 #[stable(feature = "env", since = "1.0.0")]
 impl fmt::Display for JoinPathsError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.inner.fmt(f)
     }
 }
 
 #[stable(feature = "env", since = "1.0.0")]
 impl Error for JoinPathsError {
-    fn description(&self) -> &str { self.inner.description() }
+    #[allow(deprecated, deprecated_in_future)]
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
 }
 
 /// Returns the path of the current user's home directory if known.
@@ -527,7 +552,7 @@ impl Error for JoinPathsError {
 ///   (including to an empty string).
 /// - If both do not exist, [`GetUserProfileDirectory`][msdn] is used to return the path.
 ///
-/// [msdn]: https://msdn.microsoft.com/en-us/library/windows/desktop/bb762280(v=vs.85).aspx
+/// [msdn]: https://docs.microsoft.com/en-us/windows/win32/api/userenv/nf-userenv-getuserprofiledirectorya
 ///
 /// # Examples
 ///
@@ -539,9 +564,11 @@ impl Error for JoinPathsError {
 ///     None => println!("Impossible to get your home dir!"),
 /// }
 /// ```
-#[rustc_deprecated(since = "1.29.0",
+#[rustc_deprecated(
+    since = "1.29.0",
     reason = "This function's behavior is unexpected and probably not what you want. \
-              Consider using the home_dir function from https://crates.io/crates/dirs instead.")]
+              Consider using the home_dir function from https://crates.io/crates/dirs instead."
+)]
 #[stable(feature = "env", since = "1.0.0")]
 pub fn home_dir() -> Option<PathBuf> {
     os_imp::home_dir()
@@ -564,7 +591,7 @@ pub fn home_dir() -> Option<PathBuf> {
 /// This behavior is identical to that of [`GetTempPath`][msdn], which this
 /// function uses internally.
 ///
-/// [msdn]: https://msdn.microsoft.com/en-us/library/windows/desktop/aa364992(v=vs.85).aspx
+/// [msdn]: https://docs.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-gettemppatha
 ///
 /// ```no_run
 /// use std::env;
@@ -664,7 +691,9 @@ pub fn current_exe() -> io::Result<PathBuf> {
 /// [`String`]: ../string/struct.String.html
 /// [`std::env::args`]: ./fn.args.html
 #[stable(feature = "env", since = "1.0.0")]
-pub struct Args { inner: ArgsOs }
+pub struct Args {
+    inner: ArgsOs,
+}
 
 /// An iterator over the arguments of a process, yielding an [`OsString`] value
 /// for each argument.
@@ -679,7 +708,9 @@ pub struct Args { inner: ArgsOs }
 /// [`OsString`]: ../ffi/struct.OsString.html
 /// [`std::env::args_os`]: ./fn.args_os.html
 #[stable(feature = "env", since = "1.0.0")]
-pub struct ArgsOs { inner: sys::args::Args }
+pub struct ArgsOs {
+    inner: sys::args::Args,
+}
 
 /// Returns the arguments which this program was started with (normally passed
 /// via the command line).
@@ -691,6 +722,11 @@ pub struct ArgsOs { inner: sys::args::Args }
 /// On Unix systems shell usually expands unquoted arguments with glob patterns
 /// (such as `*` and `?`). On Windows this is not done, and such arguments are
 /// passed as-is.
+///
+/// On glibc Linux, arguments are retrieved by placing a function in .init_array.
+/// glibc passes argc, argv, and envp to functions in .init_array, as a non-standard extension.
+/// This allows `std::env::args` to work even in a `cdylib` or `staticlib`, as it does on macOS
+/// and Windows.
 ///
 /// # Panics
 ///
@@ -722,6 +758,11 @@ pub fn args() -> Args {
 /// set to arbitrary text, and it may not even exist, so this property should
 /// not be relied upon for security purposes.
 ///
+/// On glibc Linux, arguments are retrieved by placing a function in .init_array.
+/// glibc passes argc, argv, and envp to functions in .init_array, as a non-standard extension.
+/// This allows `std::env::args` to work even in a `cdylib` or `staticlib`, as it does on macOS
+/// and Windows.
+///
 /// # Examples
 ///
 /// ```
@@ -749,13 +790,19 @@ impl Iterator for Args {
     fn next(&mut self) -> Option<String> {
         self.inner.next().map(|s| s.into_string().unwrap())
     }
-    fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 #[stable(feature = "env", since = "1.0.0")]
 impl ExactSizeIterator for Args {
-    fn len(&self) -> usize { self.inner.len() }
-    fn is_empty(&self) -> bool { self.inner.is_empty() }
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 #[stable(feature = "env_iterators", since = "1.12.0")]
@@ -767,10 +814,8 @@ impl DoubleEndedIterator for Args {
 
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for Args {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Args")
-            .field("inner", &self.inner.inner.inner_debug())
-            .finish()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Args").field("inner", &self.inner.inner.inner_debug()).finish()
     }
 }
 
@@ -783,34 +828,42 @@ impl !Sync for ArgsOs {}
 #[stable(feature = "env", since = "1.0.0")]
 impl Iterator for ArgsOs {
     type Item = OsString;
-    fn next(&mut self) -> Option<OsString> { self.inner.next() }
-    fn size_hint(&self) -> (usize, Option<usize>) { self.inner.size_hint() }
+    fn next(&mut self) -> Option<OsString> {
+        self.inner.next()
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.inner.size_hint()
+    }
 }
 
 #[stable(feature = "env", since = "1.0.0")]
 impl ExactSizeIterator for ArgsOs {
-    fn len(&self) -> usize { self.inner.len() }
-    fn is_empty(&self) -> bool { self.inner.is_empty() }
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+    fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 #[stable(feature = "env_iterators", since = "1.12.0")]
 impl DoubleEndedIterator for ArgsOs {
-    fn next_back(&mut self) -> Option<OsString> { self.inner.next_back() }
+    fn next_back(&mut self) -> Option<OsString> {
+        self.inner.next_back()
+    }
 }
 
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl fmt::Debug for ArgsOs {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("ArgsOs")
-            .field("inner", &self.inner.inner_debug())
-            .finish()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ArgsOs").field("inner", &self.inner.inner_debug()).finish()
     }
 }
 
 /// Constants associated with the current target
 #[stable(feature = "env", since = "1.0.0")]
 pub mod consts {
-    use sys::env::os;
+    use crate::sys::env::os;
 
     /// A string describing the architecture of the CPU that is currently
     /// in use.
@@ -828,7 +881,7 @@ pub mod consts {
     /// - s390x
     /// - sparc64
     #[stable(feature = "env", since = "1.0.0")]
-    pub const ARCH: &'static str = super::arch::ARCH;
+    pub const ARCH: &str = super::arch::ARCH;
 
     /// The family of the operating system. Example value is `unix`.
     ///
@@ -837,7 +890,7 @@ pub mod consts {
     /// - unix
     /// - windows
     #[stable(feature = "env", since = "1.0.0")]
-    pub const FAMILY: &'static str = os::FAMILY;
+    pub const FAMILY: &str = os::FAMILY;
 
     /// A string describing the specific operating system in use.
     /// Example value is `linux`.
@@ -849,14 +902,13 @@ pub mod consts {
     /// - ios
     /// - freebsd
     /// - dragonfly
-    /// - bitrig
     /// - netbsd
     /// - openbsd
     /// - solaris
     /// - android
     /// - windows
     #[stable(feature = "env", since = "1.0.0")]
-    pub const OS: &'static str = os::OS;
+    pub const OS: &str = os::OS;
 
     /// Specifies the filename prefix used for shared libraries on this
     /// platform. Example value is `lib`.
@@ -866,7 +918,7 @@ pub mod consts {
     /// - lib
     /// - `""` (an empty string)
     #[stable(feature = "env", since = "1.0.0")]
-    pub const DLL_PREFIX: &'static str = os::DLL_PREFIX;
+    pub const DLL_PREFIX: &str = os::DLL_PREFIX;
 
     /// Specifies the filename suffix used for shared libraries on this
     /// platform. Example value is `.so`.
@@ -877,7 +929,7 @@ pub mod consts {
     /// - .dylib
     /// - .dll
     #[stable(feature = "env", since = "1.0.0")]
-    pub const DLL_SUFFIX: &'static str = os::DLL_SUFFIX;
+    pub const DLL_SUFFIX: &str = os::DLL_SUFFIX;
 
     /// Specifies the file extension used for shared libraries on this
     /// platform that goes after the dot. Example value is `so`.
@@ -888,7 +940,7 @@ pub mod consts {
     /// - dylib
     /// - dll
     #[stable(feature = "env", since = "1.0.0")]
-    pub const DLL_EXTENSION: &'static str = os::DLL_EXTENSION;
+    pub const DLL_EXTENSION: &str = os::DLL_EXTENSION;
 
     /// Specifies the filename suffix used for executable binaries on this
     /// platform. Example value is `.exe`.
@@ -900,7 +952,7 @@ pub mod consts {
     /// - .pexe
     /// - `""` (an empty string)
     #[stable(feature = "env", since = "1.0.0")]
-    pub const EXE_SUFFIX: &'static str = os::EXE_SUFFIX;
+    pub const EXE_SUFFIX: &str = os::EXE_SUFFIX;
 
     /// Specifies the file extension, if any, used for executable binaries
     /// on this platform. Example value is `exe`.
@@ -910,82 +962,87 @@ pub mod consts {
     /// - exe
     /// - `""` (an empty string)
     #[stable(feature = "env", since = "1.0.0")]
-    pub const EXE_EXTENSION: &'static str = os::EXE_EXTENSION;
+    pub const EXE_EXTENSION: &str = os::EXE_EXTENSION;
 }
 
 #[cfg(target_arch = "x86")]
 mod arch {
-    pub const ARCH: &'static str = "x86";
+    pub const ARCH: &str = "x86";
 }
 
 #[cfg(target_arch = "x86_64")]
 mod arch {
-    pub const ARCH: &'static str = "x86_64";
+    pub const ARCH: &str = "x86_64";
 }
 
 #[cfg(target_arch = "arm")]
 mod arch {
-    pub const ARCH: &'static str = "arm";
+    pub const ARCH: &str = "arm";
 }
 
 #[cfg(target_arch = "aarch64")]
 mod arch {
-    pub const ARCH: &'static str = "aarch64";
+    pub const ARCH: &str = "aarch64";
 }
 
 #[cfg(target_arch = "mips")]
 mod arch {
-    pub const ARCH: &'static str = "mips";
+    pub const ARCH: &str = "mips";
 }
 
 #[cfg(target_arch = "mips64")]
 mod arch {
-    pub const ARCH: &'static str = "mips64";
+    pub const ARCH: &str = "mips64";
 }
 
 #[cfg(target_arch = "powerpc")]
 mod arch {
-    pub const ARCH: &'static str = "powerpc";
+    pub const ARCH: &str = "powerpc";
 }
 
 #[cfg(target_arch = "powerpc64")]
 mod arch {
-    pub const ARCH: &'static str = "powerpc64";
+    pub const ARCH: &str = "powerpc64";
 }
 
 #[cfg(target_arch = "s390x")]
 mod arch {
-    pub const ARCH: &'static str = "s390x";
+    pub const ARCH: &str = "s390x";
 }
 
 #[cfg(target_arch = "sparc64")]
 mod arch {
-    pub const ARCH: &'static str = "sparc64";
+    pub const ARCH: &str = "sparc64";
 }
 
 #[cfg(target_arch = "le32")]
 mod arch {
-    pub const ARCH: &'static str = "le32";
+    pub const ARCH: &str = "le32";
 }
 
 #[cfg(target_arch = "asmjs")]
 mod arch {
-    pub const ARCH: &'static str = "asmjs";
+    pub const ARCH: &str = "asmjs";
 }
 
 #[cfg(target_arch = "wasm32")]
 mod arch {
-    pub const ARCH: &'static str = "wasm32";
+    pub const ARCH: &str = "wasm32";
+}
+
+#[cfg(target_arch = "hexagon")]
+mod arch {
+    pub const ARCH: &'static str = "hexagon";
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use path::Path;
+    use crate::path::Path;
 
     #[test]
-    #[cfg_attr(target_os = "emscripten", ignore)]
+    #[cfg_attr(any(target_os = "emscripten", target_env = "sgx"), ignore)]
     fn test_self_exe_path() {
         let path = current_exe();
         assert!(path.is_ok());
@@ -999,17 +1056,18 @@ mod tests {
     fn test() {
         assert!((!Path::new("test-path").is_absolute()));
 
+        #[cfg(not(target_env = "sgx"))]
         current_dir().unwrap();
     }
 
     #[test]
     #[cfg(windows)]
     fn split_paths_windows() {
-        use path::PathBuf;
+        use crate::path::PathBuf;
 
         fn check_parse(unparsed: &str, parsed: &[&str]) -> bool {
-            split_paths(unparsed).collect::<Vec<_>>() ==
-                parsed.iter().map(|s| PathBuf::from(*s)).collect::<Vec<_>>()
+            split_paths(unparsed).collect::<Vec<_>>()
+                == parsed.iter().map(|s| PathBuf::from(*s)).collect::<Vec<_>>()
         }
 
         assert!(check_parse("", &mut [""]));
@@ -1017,21 +1075,22 @@ mod tests {
         assert!(check_parse(";;", &mut ["", "", ""]));
         assert!(check_parse(r"c:\", &mut [r"c:\"]));
         assert!(check_parse(r"c:\;", &mut [r"c:\", ""]));
-        assert!(check_parse(r"c:\;c:\Program Files\",
-                            &mut [r"c:\", r"c:\Program Files\"]));
+        assert!(check_parse(r"c:\;c:\Program Files\", &mut [r"c:\", r"c:\Program Files\"]));
         assert!(check_parse(r#"c:\;c:\"foo"\"#, &mut [r"c:\", r"c:\foo\"]));
-        assert!(check_parse(r#"c:\;c:\"foo;bar"\;c:\baz"#,
-                            &mut [r"c:\", r"c:\foo;bar\", r"c:\baz"]));
+        assert!(check_parse(
+            r#"c:\;c:\"foo;bar"\;c:\baz"#,
+            &mut [r"c:\", r"c:\foo;bar\", r"c:\baz"]
+        ));
     }
 
     #[test]
     #[cfg(unix)]
     fn split_paths_unix() {
-        use path::PathBuf;
+        use crate::path::PathBuf;
 
         fn check_parse(unparsed: &str, parsed: &[&str]) -> bool {
-            split_paths(unparsed).collect::<Vec<_>>() ==
-                parsed.iter().map(|s| PathBuf::from(*s)).collect::<Vec<_>>()
+            split_paths(unparsed).collect::<Vec<_>>()
+                == parsed.iter().map(|s| PathBuf::from(*s)).collect::<Vec<_>>()
         }
 
         assert!(check_parse("", &mut [""]));
@@ -1044,38 +1103,31 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn join_paths_unix() {
-        use ffi::OsStr;
+        use crate::ffi::OsStr;
 
         fn test_eq(input: &[&str], output: &str) -> bool {
-            &*join_paths(input.iter().cloned()).unwrap() ==
-                OsStr::new(output)
+            &*join_paths(input.iter().cloned()).unwrap() == OsStr::new(output)
         }
 
         assert!(test_eq(&[], ""));
-        assert!(test_eq(&["/bin", "/usr/bin", "/usr/local/bin"],
-                         "/bin:/usr/bin:/usr/local/bin"));
-        assert!(test_eq(&["", "/bin", "", "", "/usr/bin", ""],
-                         ":/bin:::/usr/bin:"));
+        assert!(test_eq(&["/bin", "/usr/bin", "/usr/local/bin"], "/bin:/usr/bin:/usr/local/bin"));
+        assert!(test_eq(&["", "/bin", "", "", "/usr/bin", ""], ":/bin:::/usr/bin:"));
         assert!(join_paths(["/te:st"].iter().cloned()).is_err());
     }
 
     #[test]
     #[cfg(windows)]
     fn join_paths_windows() {
-        use ffi::OsStr;
+        use crate::ffi::OsStr;
 
         fn test_eq(input: &[&str], output: &str) -> bool {
-            &*join_paths(input.iter().cloned()).unwrap() ==
-                OsStr::new(output)
+            &*join_paths(input.iter().cloned()).unwrap() == OsStr::new(output)
         }
 
         assert!(test_eq(&[], ""));
-        assert!(test_eq(&[r"c:\windows", r"c:\"],
-                        r"c:\windows;c:\"));
-        assert!(test_eq(&["", r"c:\windows", "", "", r"c:\", ""],
-                        r";c:\windows;;;c:\;"));
-        assert!(test_eq(&[r"c:\te;st", r"c:\"],
-                        r#""c:\te;st";c:\"#));
+        assert!(test_eq(&[r"c:\windows", r"c:\"], r"c:\windows;c:\"));
+        assert!(test_eq(&["", r"c:\windows", "", "", r"c:\", ""], r";c:\windows;;;c:\;"));
+        assert!(test_eq(&[r"c:\te;st", r"c:\"], r#""c:\te;st";c:\"#));
         assert!(join_paths([r#"c:\te"st"#].iter().cloned()).is_err());
     }
 
@@ -1083,9 +1135,11 @@ mod tests {
     fn args_debug() {
         assert_eq!(
             format!("Args {{ inner: {:?} }}", args().collect::<Vec<_>>()),
-            format!("{:?}", args()));
+            format!("{:?}", args())
+        );
         assert_eq!(
             format!("ArgsOs {{ inner: {:?} }}", args_os().collect::<Vec<_>>()),
-            format!("{:?}", args_os()));
+            format!("{:?}", args_os())
+        );
     }
 }

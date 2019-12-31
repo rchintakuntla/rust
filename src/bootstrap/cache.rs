@@ -1,16 +1,7 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::any::{Any, TypeId};
 use std::borrow::Borrow;
 use std::cell::RefCell;
+use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::HashMap;
 use std::convert::AsRef;
 use std::ffi::OsStr;
@@ -21,9 +12,10 @@ use std::mem;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::cmp::{PartialOrd, Ord, Ordering};
 
-use builder::Step;
+use lazy_static::lazy_static;
+
+use crate::builder::Step;
 
 pub struct Interned<T>(usize, PhantomData<*const T>);
 
@@ -55,7 +47,7 @@ impl<T> Eq for Interned<T> {}
 
 impl PartialEq<str> for Interned<String> {
     fn eq(&self, other: &str) -> bool {
-       *self == other
+        *self == other
     }
 }
 impl<'a> PartialEq<&'a str> for Interned<String> {
@@ -78,20 +70,20 @@ unsafe impl<T> Send for Interned<T> {}
 unsafe impl<T> Sync for Interned<T> {}
 
 impl fmt::Display for Interned<String> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: &str = &*self;
         f.write_str(s)
     }
 }
 
 impl fmt::Debug for Interned<String> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: &str = &*self;
         f.write_fmt(format_args!("{:?}", s))
     }
 }
 impl fmt::Debug for Interned<PathBuf> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s: &Path = &*self;
         f.write_fmt(format_args!("{:?}", s))
     }
@@ -169,29 +161,28 @@ impl Ord for Interned<String> {
     }
 }
 
-struct TyIntern<T> {
+struct TyIntern<T: Clone + Eq> {
     items: Vec<T>,
     set: HashMap<T, Interned<T>>,
 }
 
-impl<T: Hash + Clone + Eq> TyIntern<T> {
-    fn new() -> TyIntern<T> {
-        TyIntern {
-            items: Vec::new(),
-            set: HashMap::new(),
-        }
+impl<T: Hash + Clone + Eq> Default for TyIntern<T> {
+    fn default() -> Self {
+        TyIntern { items: Vec::new(), set: Default::default() }
     }
+}
 
+impl<T: Hash + Clone + Eq> TyIntern<T> {
     fn intern_borrow<B>(&mut self, item: &B) -> Interned<T>
     where
-        B: Eq + Hash + ToOwned<Owned=T> + ?Sized,
+        B: Eq + Hash + ToOwned<Owned = T> + ?Sized,
         T: Borrow<B>,
     {
         if let Some(i) = self.set.get(&item) {
             return *i;
         }
         let item = item.to_owned();
-        let interned =  Interned(self.items.len(), PhantomData::<*const T>);
+        let interned = Interned(self.items.len(), PhantomData::<*const T>);
         self.set.insert(item.clone(), interned);
         self.items.push(item);
         interned
@@ -201,7 +192,7 @@ impl<T: Hash + Clone + Eq> TyIntern<T> {
         if let Some(i) = self.set.get(&item) {
             return *i;
         }
-        let interned =  Interned(self.items.len(), PhantomData::<*const T>);
+        let interned = Interned(self.items.len(), PhantomData::<*const T>);
         self.set.insert(item.clone(), interned);
         self.items.push(item);
         interned
@@ -212,19 +203,13 @@ impl<T: Hash + Clone + Eq> TyIntern<T> {
     }
 }
 
+#[derive(Default)]
 pub struct Interner {
     strs: Mutex<TyIntern<String>>,
     paths: Mutex<TyIntern<PathBuf>>,
 }
 
 impl Interner {
-    fn new() -> Interner {
-        Interner {
-            strs: Mutex::new(TyIntern::new()),
-            paths: Mutex::new(TyIntern::new()),
-        }
-    }
-
     pub fn intern_str(&self, s: &str) -> Interned<String> {
         self.strs.lock().unwrap().intern_borrow(s)
     }
@@ -238,19 +223,21 @@ impl Interner {
 }
 
 lazy_static! {
-    pub static ref INTERNER: Interner = Interner::new();
+    pub static ref INTERNER: Interner = Interner::default();
 }
 
-/// This is essentially a HashMap which allows storing any type in its input and
+/// This is essentially a `HashMap` which allows storing any type in its input and
 /// any type in its output. It is a write-once cache; values are never evicted,
 /// which means that references to the value can safely be returned from the
-/// get() method.
+/// `get()` method.
 #[derive(Debug)]
 pub struct Cache(
-    RefCell<HashMap<
-        TypeId,
-        Box<dyn Any>, // actually a HashMap<Step, Interned<Step::Output>>
-    >>
+    RefCell<
+        HashMap<
+            TypeId,
+            Box<dyn Any>, // actually a HashMap<Step, Interned<Step::Output>>
+        >,
+    >,
 );
 
 impl Cache {
@@ -261,10 +248,11 @@ impl Cache {
     pub fn put<S: Step>(&self, step: S, value: S::Output) {
         let mut cache = self.0.borrow_mut();
         let type_id = TypeId::of::<S>();
-        let stepcache = cache.entry(type_id)
-                        .or_insert_with(|| Box::new(HashMap::<S, S::Output>::new()))
-                        .downcast_mut::<HashMap<S, S::Output>>()
-                        .expect("invalid type mapped");
+        let stepcache = cache
+            .entry(type_id)
+            .or_insert_with(|| Box::new(HashMap::<S, S::Output>::new()))
+            .downcast_mut::<HashMap<S, S::Output>>()
+            .expect("invalid type mapped");
         assert!(!stepcache.contains_key(&step), "processing {:?} a second time", step);
         stepcache.insert(step, value);
     }
@@ -272,22 +260,30 @@ impl Cache {
     pub fn get<S: Step>(&self, step: &S) -> Option<S::Output> {
         let mut cache = self.0.borrow_mut();
         let type_id = TypeId::of::<S>();
-        let stepcache = cache.entry(type_id)
-                        .or_insert_with(|| Box::new(HashMap::<S, S::Output>::new()))
-                        .downcast_mut::<HashMap<S, S::Output>>()
-                        .expect("invalid type mapped");
+        let stepcache = cache
+            .entry(type_id)
+            .or_insert_with(|| Box::new(HashMap::<S, S::Output>::new()))
+            .downcast_mut::<HashMap<S, S::Output>>()
+            .expect("invalid type mapped");
         stepcache.get(step).cloned()
     }
+}
 
-    #[cfg(test)]
+#[cfg(test)]
+impl Cache {
     pub fn all<S: Ord + Copy + Step>(&mut self) -> Vec<(S, S::Output)> {
         let cache = self.0.get_mut();
         let type_id = TypeId::of::<S>();
-        let mut v = cache.remove(&type_id)
+        let mut v = cache
+            .remove(&type_id)
             .map(|b| b.downcast::<HashMap<S, S::Output>>().expect("correct type"))
             .map(|m| m.into_iter().collect::<Vec<_>>())
             .unwrap_or_default();
         v.sort_by_key(|&(a, _)| a);
         v
+    }
+
+    pub fn contains<S: Step>(&self) -> bool {
+        self.0.borrow().contains_key(&TypeId::of::<S>())
     }
 }

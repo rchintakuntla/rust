@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! A module for working with borrowed data.
 
 #![stable(feature = "rust1", since = "1.0.0")]
@@ -16,18 +6,19 @@ use core::cmp::Ordering;
 use core::hash::{Hash, Hasher};
 use core::ops::{Add, AddAssign, Deref};
 
-use fmt;
-use string::String;
-
-use self::Cow::*;
-
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::borrow::{Borrow, BorrowMut};
 
+use crate::fmt;
+use crate::string::String;
+
+use Cow::*;
+
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a, B: ?Sized> Borrow<B> for Cow<'a, B>
-    where B: ToOwned,
-          <B as ToOwned>::Owned: 'a
+where
+    B: ToOwned,
+    <B as ToOwned>::Owned: 'a,
 {
     fn borrow(&self) -> &B {
         &**self
@@ -42,6 +33,7 @@ impl<'a, B: ?Sized> Borrow<B> for Cow<'a, B>
 /// from any borrow of a given type.
 #[stable(feature = "rust1", since = "1.0.0")]
 pub trait ToOwned {
+    /// The resulting type after obtaining ownership.
     #[stable(feature = "rust1", since = "1.0.0")]
     type Owned: Borrow<Self>;
 
@@ -78,9 +70,7 @@ pub trait ToOwned {
     /// let mut v: Vec<i32> = Vec::new();
     /// [1, 2][..].clone_into(&mut v);
     /// ```
-    #[unstable(feature = "toowned_clone_into",
-               reason = "recently added",
-               issue = "41263")]
+    #[unstable(feature = "toowned_clone_into", reason = "recently added", issue = "41263")]
     fn clone_into(&self, target: &mut Self::Owned) {
         *target = self.to_owned();
     }
@@ -88,7 +78,8 @@ pub trait ToOwned {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T> ToOwned for T
-    where T: Clone
+where
+    T: Clone,
 {
     type Owned = T;
     fn to_owned(&self) -> T {
@@ -141,26 +132,58 @@ impl<T> ToOwned for T
 /// let mut input = Cow::from(vec![-1, 0, 1]);
 /// abs_all(&mut input);
 /// ```
+///
+/// Another example showing how to keep `Cow` in a struct:
+///
+/// ```
+/// use std::borrow::Cow;
+///
+/// struct Items<'a, X: 'a> where [X]: ToOwned<Owned = Vec<X>> {
+///     values: Cow<'a, [X]>,
+/// }
+///
+/// impl<'a, X: Clone + 'a> Items<'a, X> where [X]: ToOwned<Owned = Vec<X>> {
+///     fn new(v: Cow<'a, [X]>) -> Self {
+///         Items { values: v }
+///     }
+/// }
+///
+/// // Creates a container from borrowed values of a slice
+/// let readonly = [1, 2];
+/// let borrowed = Items::new((&readonly[..]).into());
+/// match borrowed {
+///     Items { values: Cow::Borrowed(b) } => println!("borrowed {:?}", b),
+///     _ => panic!("expect borrowed value"),
+/// }
+///
+/// let mut clone_on_write = borrowed;
+/// // Mutates the data from slice into owned vec and pushes a new value on top
+/// clone_on_write.values.to_mut().push(3);
+/// println!("clone_on_write = {:?}", clone_on_write.values);
+///
+/// // The data was mutated. Let check it out.
+/// match clone_on_write {
+///     Items { values: Cow::Owned(_) } => println!("clone_on_write contains owned data"),
+///     _ => panic!("expect owned data"),
+/// }
+/// ```
 #[stable(feature = "rust1", since = "1.0.0")]
 pub enum Cow<'a, B: ?Sized + 'a>
-    where B: ToOwned
+where
+    B: ToOwned,
 {
     /// Borrowed data.
     #[stable(feature = "rust1", since = "1.0.0")]
-    Borrowed(#[stable(feature = "rust1", since = "1.0.0")]
-             &'a B),
+    Borrowed(#[stable(feature = "rust1", since = "1.0.0")] &'a B),
 
     /// Owned data.
     #[stable(feature = "rust1", since = "1.0.0")]
-    Owned(#[stable(feature = "rust1", since = "1.0.0")]
-          <B as ToOwned>::Owned),
+    Owned(#[stable(feature = "rust1", since = "1.0.0")] <B as ToOwned>::Owned),
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> Clone for Cow<'a, B>
-    where B: ToOwned
-{
-    fn clone(&self) -> Cow<'a, B> {
+impl<B: ?Sized + ToOwned> Clone for Cow<'_, B> {
+    fn clone(&self) -> Self {
         match *self {
             Borrowed(b) => Borrowed(b),
             Owned(ref o) => {
@@ -170,21 +193,56 @@ impl<'a, B: ?Sized> Clone for Cow<'a, B>
         }
     }
 
-    fn clone_from(&mut self, source: &Cow<'a, B>) {
-        if let Owned(ref mut dest) = *self {
-            if let Owned(ref o) = *source {
-                o.borrow().clone_into(dest);
-                return;
-            }
+    fn clone_from(&mut self, source: &Self) {
+        match (self, source) {
+            (&mut Owned(ref mut dest), &Owned(ref o)) => o.borrow().clone_into(dest),
+            (t, s) => *t = s.clone(),
         }
-
-        *self = source.clone();
     }
 }
 
-impl<'a, B: ?Sized> Cow<'a, B>
-    where B: ToOwned
-{
+impl<B: ?Sized + ToOwned> Cow<'_, B> {
+    /// Returns true if the data is borrowed, i.e. if `to_mut` would require additional work.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(cow_is_borrowed)]
+    /// use std::borrow::Cow;
+    ///
+    /// let cow = Cow::Borrowed("moo");
+    /// assert!(cow.is_borrowed());
+    ///
+    /// let bull: Cow<'_, str> = Cow::Owned("...moo?".to_string());
+    /// assert!(!bull.is_borrowed());
+    /// ```
+    #[unstable(feature = "cow_is_borrowed", issue = "65143")]
+    pub fn is_borrowed(&self) -> bool {
+        match *self {
+            Borrowed(_) => true,
+            Owned(_) => false,
+        }
+    }
+
+    /// Returns true if the data is owned, i.e. if `to_mut` would be a no-op.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(cow_is_borrowed)]
+    /// use std::borrow::Cow;
+    ///
+    /// let cow: Cow<'_, str> = Cow::Owned("moo".to_string());
+    /// assert!(cow.is_owned());
+    ///
+    /// let bull = Cow::Borrowed("...moo?");
+    /// assert!(!bull.is_owned());
+    /// ```
+    #[unstable(feature = "cow_is_borrowed", issue = "65143")]
+    pub fn is_owned(&self) -> bool {
+        !self.is_borrowed()
+    }
+
     /// Acquires a mutable reference to the owned form of the data.
     ///
     /// Clones the data if it is not already owned.
@@ -260,9 +318,7 @@ impl<'a, B: ?Sized> Cow<'a, B>
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> Deref for Cow<'a, B>
-    where B: ToOwned
-{
+impl<B: ?Sized + ToOwned> Deref for Cow<'_, B> {
     type Target = B;
 
     fn deref(&self) -> &B {
@@ -274,22 +330,24 @@ impl<'a, B: ?Sized> Deref for Cow<'a, B>
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> Eq for Cow<'a, B> where B: Eq + ToOwned {}
+impl<B: ?Sized> Eq for Cow<'_, B> where B: Eq + ToOwned {}
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> Ord for Cow<'a, B>
-    where B: Ord + ToOwned
+impl<B: ?Sized> Ord for Cow<'_, B>
+where
+    B: Ord + ToOwned,
 {
     #[inline]
-    fn cmp(&self, other: &Cow<'a, B>) -> Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         Ord::cmp(&**self, &**other)
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a, 'b, B: ?Sized, C: ?Sized> PartialEq<Cow<'b, C>> for Cow<'a, B>
-    where B: PartialEq<C> + ToOwned,
-          C: ToOwned
+where
+    B: PartialEq<C> + ToOwned,
+    C: ToOwned,
 {
     #[inline]
     fn eq(&self, other: &Cow<'b, C>) -> bool {
@@ -299,7 +357,8 @@ impl<'a, 'b, B: ?Sized, C: ?Sized> PartialEq<Cow<'b, C>> for Cow<'a, B>
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<'a, B: ?Sized> PartialOrd for Cow<'a, B>
-    where B: PartialOrd + ToOwned
+where
+    B: PartialOrd + ToOwned,
 {
     #[inline]
     fn partial_cmp(&self, other: &Cow<'a, B>) -> Option<Ordering> {
@@ -308,11 +367,11 @@ impl<'a, B: ?Sized> PartialOrd for Cow<'a, B>
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> fmt::Debug for Cow<'a, B>
-    where B: fmt::Debug + ToOwned,
-          <B as ToOwned>::Owned: fmt::Debug
+impl<B: ?Sized> fmt::Debug for Cow<'_, B>
+where
+    B: fmt::Debug + ToOwned<Owned: fmt::Debug>,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Borrowed(ref b) => fmt::Debug::fmt(b, f),
             Owned(ref o) => fmt::Debug::fmt(o, f),
@@ -321,11 +380,11 @@ impl<'a, B: ?Sized> fmt::Debug for Cow<'a, B>
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> fmt::Display for Cow<'a, B>
-    where B: fmt::Display + ToOwned,
-          <B as ToOwned>::Owned: fmt::Display
+impl<B: ?Sized> fmt::Display for Cow<'_, B>
+where
+    B: fmt::Display + ToOwned<Owned: fmt::Display>,
 {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Borrowed(ref b) => fmt::Display::fmt(b, f),
             Owned(ref o) => fmt::Display::fmt(o, f),
@@ -334,19 +393,20 @@ impl<'a, B: ?Sized> fmt::Display for Cow<'a, B>
 }
 
 #[stable(feature = "default", since = "1.11.0")]
-impl<'a, B: ?Sized> Default for Cow<'a, B>
-    where B: ToOwned,
-          <B as ToOwned>::Owned: Default
+impl<B: ?Sized> Default for Cow<'_, B>
+where
+    B: ToOwned<Owned: Default>,
 {
     /// Creates an owned Cow<'a, B> with the default value for the contained owned value.
-    fn default() -> Cow<'a, B> {
+    fn default() -> Self {
         Owned(<B as ToOwned>::Owned::default())
     }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, B: ?Sized> Hash for Cow<'a, B>
-    where B: Hash + ToOwned
+impl<B: ?Sized> Hash for Cow<'_, B>
+where
+    B: Hash + ToOwned,
 {
     #[inline]
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -355,8 +415,7 @@ impl<'a, B: ?Sized> Hash for Cow<'a, B>
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-#[allow(deprecated)]
-impl<'a, T: ?Sized + ToOwned> AsRef<T> for Cow<'a, T> {
+impl<T: ?Sized + ToOwned> AsRef<T> for Cow<'_, T> {
     fn as_ref(&self) -> &T {
         self
     }
@@ -389,9 +448,7 @@ impl<'a> AddAssign<&'a str> for Cow<'a, str> {
     fn add_assign(&mut self, rhs: &'a str) {
         if self.is_empty() {
             *self = Cow::Borrowed(rhs)
-        } else if rhs.is_empty() {
-            return;
-        } else {
+        } else if !rhs.is_empty() {
             if let Cow::Borrowed(lhs) = *self {
                 let mut s = String::with_capacity(lhs.len() + rhs.len());
                 s.push_str(lhs);
@@ -407,9 +464,7 @@ impl<'a> AddAssign<Cow<'a, str>> for Cow<'a, str> {
     fn add_assign(&mut self, rhs: Cow<'a, str>) {
         if self.is_empty() {
             *self = rhs
-        } else if rhs.is_empty() {
-            return;
-        } else {
+        } else if !rhs.is_empty() {
             if let Cow::Borrowed(lhs) = *self {
                 let mut s = String::with_capacity(lhs.len() + rhs.len());
                 s.push_str(lhs);

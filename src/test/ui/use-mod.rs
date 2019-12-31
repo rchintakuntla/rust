@@ -1,29 +1,33 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+// run-pass
 
-use foo::bar::{
-    self,
-//~^ ERROR `self` import can only appear once in an import list
-    Bar,
-    self
-//~^ ERROR the name `bar` is defined multiple times
-};
+#![allow(unused_imports)]
+// pretty-expanded FIXME #23616
 
-use {self};
-//~^ ERROR `self` import can only appear in an import list with a non-empty prefix
+pub use foo::bar::{self, First};
+use self::bar::Second;
 
 mod foo {
+    pub use self::bar::baz::{self};
+
     pub mod bar {
-        pub struct Bar;
-        pub struct Baz;
+        pub mod baz {
+            pub struct Fourth;
+        }
+        pub struct First;
+        pub struct Second;
     }
+
+    pub struct Third;
 }
 
-fn main() {}
+mod baz {
+    use super::foo::{bar, self};
+    pub use foo::Third;
+}
+
+fn main() {
+    let _ = First;
+    let _ = Second;
+    let _ = baz::Third;
+    let _ = foo::baz::Fourth;
+}

@@ -1,23 +1,15 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! UTF-8 and UTF-16 decoding iterators
 
-use fmt;
+use crate::fmt;
+
 use super::from_u32_unchecked;
 
 /// An iterator that decodes UTF-16 encoded code points from an iterator of `u16`s.
 #[stable(feature = "decode_utf16", since = "1.9.0")]
 #[derive(Clone, Debug)]
 pub struct DecodeUtf16<I>
-    where I: Iterator<Item = u16>
+where
+    I: Iterator<Item = u16>,
 {
     iter: I,
     buf: Option<u16>,
@@ -30,7 +22,7 @@ pub struct DecodeUtf16Error {
     code: u16,
 }
 
-/// Create an iterator over the UTF-16 encoded code points in `iter`,
+/// Creates an iterator over the UTF-16 encoded code points in `iter`,
 /// returning unpaired surrogates as `Err`s.
 ///
 /// # Examples
@@ -40,21 +32,23 @@ pub struct DecodeUtf16Error {
 /// ```
 /// use std::char::decode_utf16;
 ///
-/// fn main() {
-///     // 𝄞mus<invalid>ic<invalid>
-///     let v = [0xD834, 0xDD1E, 0x006d, 0x0075,
-///              0x0073, 0xDD1E, 0x0069, 0x0063,
-///              0xD834];
+/// // 𝄞mus<invalid>ic<invalid>
+/// let v = [
+///     0xD834, 0xDD1E, 0x006d, 0x0075, 0x0073, 0xDD1E, 0x0069, 0x0063, 0xD834,
+/// ];
 ///
-///     assert_eq!(decode_utf16(v.iter().cloned())
-///                            .map(|r| r.map_err(|e| e.unpaired_surrogate()))
-///                            .collect::<Vec<_>>(),
-///                vec![Ok('𝄞'),
-///                     Ok('m'), Ok('u'), Ok('s'),
-///                     Err(0xDD1E),
-///                     Ok('i'), Ok('c'),
-///                     Err(0xD834)]);
-/// }
+/// assert_eq!(
+///     decode_utf16(v.iter().cloned())
+///         .map(|r| r.map_err(|e| e.unpaired_surrogate()))
+///         .collect::<Vec<_>>(),
+///     vec![
+///         Ok('𝄞'),
+///         Ok('m'), Ok('u'), Ok('s'),
+///         Err(0xDD1E),
+///         Ok('i'), Ok('c'),
+///         Err(0xD834)
+///     ]
+/// );
 /// ```
 ///
 /// A lossy decoder can be obtained by replacing `Err` results with the replacement character:
@@ -62,25 +56,22 @@ pub struct DecodeUtf16Error {
 /// ```
 /// use std::char::{decode_utf16, REPLACEMENT_CHARACTER};
 ///
-/// fn main() {
-///     // 𝄞mus<invalid>ic<invalid>
-///     let v = [0xD834, 0xDD1E, 0x006d, 0x0075,
-///              0x0073, 0xDD1E, 0x0069, 0x0063,
-///              0xD834];
+/// // 𝄞mus<invalid>ic<invalid>
+/// let v = [
+///     0xD834, 0xDD1E, 0x006d, 0x0075, 0x0073, 0xDD1E, 0x0069, 0x0063, 0xD834,
+/// ];
 ///
-///     assert_eq!(decode_utf16(v.iter().cloned())
-///                    .map(|r| r.unwrap_or(REPLACEMENT_CHARACTER))
-///                    .collect::<String>(),
-///                "𝄞mus�ic�");
-/// }
+/// assert_eq!(
+///     decode_utf16(v.iter().cloned())
+///        .map(|r| r.unwrap_or(REPLACEMENT_CHARACTER))
+///        .collect::<String>(),
+///     "𝄞mus�ic�"
+/// );
 /// ```
 #[stable(feature = "decode_utf16", since = "1.9.0")]
 #[inline]
 pub fn decode_utf16<I: IntoIterator<Item = u16>>(iter: I) -> DecodeUtf16<I::IntoIter> {
-    DecodeUtf16 {
-        iter: iter.into_iter(),
-        buf: None,
-    }
+    DecodeUtf16 { iter: iter.into_iter(), buf: None }
 }
 
 #[stable(feature = "decode_utf16", since = "1.9.0")]
@@ -90,11 +81,11 @@ impl<I: Iterator<Item = u16>> Iterator for DecodeUtf16<I> {
     fn next(&mut self) -> Option<Result<char, DecodeUtf16Error>> {
         let u = match self.buf.take() {
             Some(buf) => buf,
-            None => self.iter.next()?
+            None => self.iter.next()?,
         };
 
         if u < 0xD800 || 0xDFFF < u {
-            // not a surrogate
+            // SAFETY: not a surrogate
             Some(Ok(unsafe { from_u32_unchecked(u as u32) }))
         } else if u >= 0xDC00 {
             // a trailing surrogate
@@ -114,6 +105,7 @@ impl<I: Iterator<Item = u16>> Iterator for DecodeUtf16<I> {
 
             // all ok, so lets decode it.
             let c = (((u - 0xD800) as u32) << 10 | (u2 - 0xDC00) as u32) + 0x1_0000;
+            // SAFETY: we checked that it's a legal unicode value
             Some(Ok(unsafe { from_u32_unchecked(c) }))
         }
     }
@@ -137,7 +129,7 @@ impl DecodeUtf16Error {
 
 #[stable(feature = "decode_utf16", since = "1.9.0")]
 impl fmt::Display for DecodeUtf16Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "unpaired surrogate found: {:x}", self.code)
     }
 }

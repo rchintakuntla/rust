@@ -1,20 +1,11 @@
-// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use hir::map as hir_map;
+use hir::Node;
 use rustc::hir;
 use rustc::hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
 use rustc::ty::query::Providers;
-use rustc::ty::subst::UnpackedKind;
+use rustc::ty::subst::GenericArgKind;
 use rustc::ty::{self, CratePredicatesMap, TyCtxt};
-use rustc_data_structures::sync::Lrc;
+use syntax::symbol::sym;
+use syntax_pos::Span;
 
 mod explicit;
 mod implicit_infer;
@@ -22,42 +13,26 @@ mod implicit_infer;
 pub mod test;
 mod utils;
 
-pub fn provide(providers: &mut Providers) {
-    *providers = Providers {
-        inferred_outlives_of,
-        inferred_outlives_crate,
-        ..*providers
-    };
+pub fn provide(providers: &mut Providers<'_>) {
+    *providers = Providers { inferred_outlives_of, inferred_outlives_crate, ..*providers };
 }
 
-fn inferred_outlives_of<'a, 'tcx>(
-    tcx: TyCtxt<'a, 'tcx, 'tcx>,
-    item_def_id: DefId,
-) -> Lrc<Vec<ty::Predicate<'tcx>>> {
-    let id = tcx
-        .hir
-        .as_local_node_id(item_def_id)
-        .expect("expected local def-id");
+fn inferred_outlives_of(tcx: TyCtxt<'_>, item_def_id: DefId) -> &[(ty::Predicate<'_>, Span)] {
+    let id = tcx.hir().as_local_hir_id(item_def_id).expect("expected local def-id");
 
-    match tcx.hir.get(id) {
-        hir_map::NodeItem(item) => match item.node {
+    match tcx.hir().get(id) {
+        Node::Item(item) => match item.kind {
             hir::ItemKind::Struct(..) | hir::ItemKind::Enum(..) | hir::ItemKind::Union(..) => {
                 let crate_map = tcx.inferred_outlives_crate(LOCAL_CRATE);
 
-                let predicates = crate_map
-                    .predicates
-                    .get(&item_def_id)
-                    .unwrap_or(&crate_map.empty_predicate)
-                    .clone();
+                let predicates = crate_map.predicates.get(&item_def_id).map(|p| *p).unwrap_or(&[]);
 
-                if tcx.has_attr(item_def_id, "rustc_outlives") {
+                if tcx.has_attr(item_def_id, sym::rustc_outlives) {
                     let mut pred: Vec<String> = predicates
                         .iter()
-                        .map(|out_pred| match out_pred {
+                        .map(|(out_pred, _)| match out_pred {
                             ty::Predicate::RegionOutlives(p) => p.to_string(),
-
                             ty::Predicate::TypeOutlives(p) => p.to_string(),
-
                             err => bug!("unexpected predicate {:?}", err),
                         })
                         .collect();
@@ -70,20 +45,20 @@ fn inferred_outlives_of<'a, 'tcx>(
                     }
                     err.emit();
                 }
+
+                debug!("inferred_outlives_of({:?}) = {:?}", item_def_id, predicates);
+
                 predicates
             }
 
-            _ => Lrc::new(Vec::new()),
+            _ => &[],
         },
 
-        _ => Lrc::new(Vec::new()),
+        _ => &[],
     }
 }
 
-fn inferred_outlives_crate<'tcx>(
-    tcx: TyCtxt<'_, 'tcx, 'tcx>,
-    crate_num: CrateNum,
-) -> Lrc<CratePredicatesMap<'tcx>> {
+fn inferred_outlives_crate(tcx: TyCtxt<'_>, crate_num: CrateNum) -> &CratePredicatesMap<'_> {
     assert_eq!(crate_num, LOCAL_CRATE);
 
     // Compute a map from each struct/enum/union S to the **explicit**
@@ -106,27 +81,29 @@ fn inferred_outlives_crate<'tcx>(
     let predicates = global_inferred_outlives
         .iter()
         .map(|(&def_id, set)| {
-            let vec: Vec<ty::Predicate<'tcx>> = set
-                .iter()
-                .map(
-                    |ty::OutlivesPredicate(kind1, region2)| match kind1.unpack() {
-                        UnpackedKind::Type(ty1) => ty::Predicate::TypeOutlives(ty::Binder::bind(
-                            ty::OutlivesPredicate(ty1, region2),
-                        )),
-                        UnpackedKind::Lifetime(region1) => ty::Predicate::RegionOutlives(
-                            ty::Binder::bind(ty::OutlivesPredicate(region1, region2)),
-                        ),
-                    },
-                )
-                .collect();
-            (def_id, Lrc::new(vec))
+            let predicates = &*tcx.arena.alloc_from_iter(set.iter().filter_map(
+                |(ty::OutlivesPredicate(kind1, region2), &span)| match kind1.unpack() {
+                    GenericArgKind::Type(ty1) => Some((
+                        ty::Predicate::TypeOutlives(ty::Binder::bind(ty::OutlivesPredicate(
+                            ty1, region2,
+                        ))),
+                        span,
+                    )),
+                    GenericArgKind::Lifetime(region1) => Some((
+                        ty::Predicate::RegionOutlives(ty::Binder::bind(ty::OutlivesPredicate(
+                            region1, region2,
+                        ))),
+                        span,
+                    )),
+                    GenericArgKind::Const(_) => {
+                        // Generic consts don't impose any constraints.
+                        None
+                    }
+                },
+            ));
+            (def_id, predicates)
         })
         .collect();
 
-    let empty_predicate = Lrc::new(Vec::new());
-
-    Lrc::new(ty::CratePredicatesMap {
-        predicates,
-        empty_predicate,
-    })
+    tcx.arena.alloc(ty::CratePredicatesMap { predicates })
 }

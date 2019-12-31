@@ -1,14 +1,4 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use core::cmp::Ordering::{Less, Greater, Equal};
+use core::cmp::{self, Ordering::*};
 
 #[test]
 fn test_int_totalord() {
@@ -17,6 +7,14 @@ fn test_int_totalord() {
     assert_eq!(5.cmp(&5), Equal);
     assert_eq!((-5).cmp(&12), Less);
     assert_eq!(12.cmp(&-5), Greater);
+}
+
+#[test]
+fn test_bool_totalord() {
+    assert_eq!(true.cmp(&false), Greater);
+    assert_eq!(false.cmp(&true), Less);
+    assert_eq!(true.cmp(&true), Equal);
+    assert_eq!(false.cmp(&false), Equal);
 }
 
 #[test]
@@ -36,6 +34,28 @@ fn test_ord_max_min() {
     assert_eq!(2.min(1), 1);
     assert_eq!(1.max(1), 1);
     assert_eq!(1.min(1), 1);
+}
+
+#[test]
+fn test_ord_min_max_by() {
+    let f = |x: &i32, y: &i32| x.abs().cmp(&y.abs());
+    assert_eq!(cmp::min_by(1, -1, f), 1);
+    assert_eq!(cmp::min_by(1, -2, f), 1);
+    assert_eq!(cmp::min_by(2, -1, f), -1);
+    assert_eq!(cmp::max_by(1, -1, f), -1);
+    assert_eq!(cmp::max_by(1, -2, f), -2);
+    assert_eq!(cmp::max_by(2, -1, f), 2);
+}
+
+#[test]
+fn test_ord_min_max_by_key() {
+    let f = |x: &i32| x.abs();
+    assert_eq!(cmp::min_by_key(1, -1, f), 1);
+    assert_eq!(cmp::min_by_key(1, -2, f), 1);
+    assert_eq!(cmp::min_by_key(2, -1, f), -1);
+    assert_eq!(cmp::max_by_key(1, -1, f), -1);
+    assert_eq!(cmp::max_by_key(1, -2, f), -2);
+    assert_eq!(cmp::max_by_key(2, -1, f), 2);
 }
 
 #[test]
@@ -81,7 +101,7 @@ fn test_ordering_then_with() {
 fn test_user_defined_eq() {
     // Our type.
     struct SketchyNum {
-        num : isize
+        num: isize,
     }
 
     // Our implementation of `PartialEq` to support `==` and `!=`.
@@ -93,6 +113,6 @@ fn test_user_defined_eq() {
     }
 
     // Now these binary operators will work when applied!
-    assert!(SketchyNum {num: 37} == SketchyNum {num: 34});
-    assert!(SketchyNum {num: 25} != SketchyNum {num: 57});
+    assert!(SketchyNum { num: 37 } == SketchyNum { num: 34 });
+    assert!(SketchyNum { num: 25 } != SketchyNum { num: 57 });
 }

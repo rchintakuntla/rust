@@ -1,22 +1,18 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use syntax_pos::symbol::Symbol;
-use back::write::create_target_machine;
-use llvm;
-use rustc::session::Session;
-use rustc::session::config::PrintRequest;
+use crate::back::write::create_informational_target_machine;
+use crate::llvm;
 use libc::c_int;
+use rustc::bug;
+use rustc::session::config::PrintRequest;
+use rustc::session::Session;
+use rustc_data_structures::fx::FxHashSet;
+use rustc_feature::UnstableFeatures;
+use rustc_target::spec::{MergeFunctions, PanicStrategy};
 use std::ffi::CString;
-use syntax::feature_gate::UnstableFeatures;
+use syntax::symbol::sym;
+use syntax_pos::symbol::Symbol;
 
+use std::slice;
+use std::str;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Once;
 
@@ -50,24 +46,72 @@ fn require_inited() {
 }
 
 unsafe fn configure_llvm(sess: &Session) {
-    let mut llvm_c_strs = Vec::new();
-    let mut llvm_args = Vec::new();
+    let n_args = sess.opts.cg.llvm_args.len();
+    let mut llvm_c_strs = Vec::with_capacity(n_args + 1);
+    let mut llvm_args = Vec::with_capacity(n_args + 1);
+
+    llvm::LLVMRustInstallFatalErrorHandler();
+
+    fn llvm_arg_to_arg_name(full_arg: &str) -> &str {
+        full_arg.trim().split(|c: char| c == '=' || c.is_whitespace()).next().unwrap_or("")
+    }
+
+    let user_specified_args: FxHashSet<_> = sess
+        .opts
+        .cg
+        .llvm_args
+        .iter()
+        .map(|s| llvm_arg_to_arg_name(s))
+        .filter(|s| s.len() > 0)
+        .collect();
 
     {
-        let mut add = |arg: &str| {
-            let s = CString::new(arg).unwrap();
-            llvm_args.push(s.as_ptr());
-            llvm_c_strs.push(s);
+        // This adds the given argument to LLVM. Unless `force` is true
+        // user specified arguments are *not* overridden.
+        let mut add = |arg: &str, force: bool| {
+            if force || !user_specified_args.contains(llvm_arg_to_arg_name(arg)) {
+                let s = CString::new(arg).unwrap();
+                llvm_args.push(s.as_ptr());
+                llvm_c_strs.push(s);
+            }
         };
-        add("rustc"); // fake program name
-        if sess.time_llvm_passes() { add("-time-passes"); }
-        if sess.print_llvm_passes() { add("-debug-pass=Structure"); }
-        if sess.opts.debugging_opts.disable_instrumentation_preinliner {
-            add("-disable-preinline");
+        add("rustc", true); // fake program name
+        if sess.time_llvm_passes() {
+            add("-time-passes", false);
+        }
+        if sess.print_llvm_passes() {
+            add("-debug-pass=Structure", false);
         }
 
+        if sess.opts.debugging_opts.generate_arange_section {
+            add("-generate-arange-section", false);
+        }
+        if get_major_version() >= 8 {
+            match sess
+                .opts
+                .debugging_opts
+                .merge_functions
+                .unwrap_or(sess.target.target.options.merge_functions)
+            {
+                MergeFunctions::Disabled | MergeFunctions::Trampolines => {}
+                MergeFunctions::Aliases => {
+                    add("-mergefunc-use-aliases", false);
+                }
+            }
+        }
+
+        if sess.target.target.target_os == "emscripten"
+            && sess.panic_strategy() == PanicStrategy::Unwind
+        {
+            add("-enable-emscripten-cxx-exceptions", false);
+        }
+
+        // HACK(eddyb) LLVM inserts `llvm.assume` calls to preserve align attributes
+        // during inlining. Unfortunately these may block other optimizations.
+        add("-preserve-alignment-assumptions-during-inlining=false", false);
+
         for arg in &sess.opts.cg.llvm_args {
-            add(&(*arg));
+            add(&(*arg), true);
         }
     }
 
@@ -75,111 +119,122 @@ unsafe fn configure_llvm(sess: &Session) {
 
     ::rustc_llvm::initialize_available_targets();
 
-    llvm::LLVMRustSetLLVMOptions(llvm_args.len() as c_int,
-                                 llvm_args.as_ptr());
+    llvm::LLVMRustSetLLVMOptions(llvm_args.len() as c_int, llvm_args.as_ptr());
 }
 
 // WARNING: the features after applying `to_llvm_feature` must be known
 // to LLVM or the feature detection code will walk past the end of the feature
 // array, leading to crashes.
 
-const ARM_WHITELIST: &[(&str, Option<&str>)] = &[
-    ("mclass", Some("arm_target_feature")),
-    ("rclass", Some("arm_target_feature")),
-    ("dsp", Some("arm_target_feature")),
-    ("neon", Some("arm_target_feature")),
-    ("v7", Some("arm_target_feature")),
-    ("vfp2", Some("arm_target_feature")),
-    ("vfp3", Some("arm_target_feature")),
-    ("vfp4", Some("arm_target_feature")),
+const ARM_WHITELIST: &[(&str, Option<Symbol>)] = &[
+    ("aclass", Some(sym::arm_target_feature)),
+    ("mclass", Some(sym::arm_target_feature)),
+    ("rclass", Some(sym::arm_target_feature)),
+    ("dsp", Some(sym::arm_target_feature)),
+    ("neon", Some(sym::arm_target_feature)),
+    ("crc", Some(sym::arm_target_feature)),
+    ("crypto", Some(sym::arm_target_feature)),
+    ("v5te", Some(sym::arm_target_feature)),
+    ("v6", Some(sym::arm_target_feature)),
+    ("v6k", Some(sym::arm_target_feature)),
+    ("v6t2", Some(sym::arm_target_feature)),
+    ("v7", Some(sym::arm_target_feature)),
+    ("v8", Some(sym::arm_target_feature)),
+    ("vfp2", Some(sym::arm_target_feature)),
+    ("vfp3", Some(sym::arm_target_feature)),
+    ("vfp4", Some(sym::arm_target_feature)),
 ];
 
-const AARCH64_WHITELIST: &[(&str, Option<&str>)] = &[
-    ("fp", Some("aarch64_target_feature")),
-    ("neon", Some("aarch64_target_feature")),
-    ("sve", Some("aarch64_target_feature")),
-    ("crc", Some("aarch64_target_feature")),
-    ("crypto", Some("aarch64_target_feature")),
-    ("ras", Some("aarch64_target_feature")),
-    ("lse", Some("aarch64_target_feature")),
-    ("rdm", Some("aarch64_target_feature")),
-    ("fp16", Some("aarch64_target_feature")),
-    ("rcpc", Some("aarch64_target_feature")),
-    ("dotprod", Some("aarch64_target_feature")),
-    ("v8.1a", Some("aarch64_target_feature")),
-    ("v8.2a", Some("aarch64_target_feature")),
-    ("v8.3a", Some("aarch64_target_feature")),
+const AARCH64_WHITELIST: &[(&str, Option<Symbol>)] = &[
+    ("fp", Some(sym::aarch64_target_feature)),
+    ("neon", Some(sym::aarch64_target_feature)),
+    ("sve", Some(sym::aarch64_target_feature)),
+    ("crc", Some(sym::aarch64_target_feature)),
+    ("crypto", Some(sym::aarch64_target_feature)),
+    ("ras", Some(sym::aarch64_target_feature)),
+    ("lse", Some(sym::aarch64_target_feature)),
+    ("rdm", Some(sym::aarch64_target_feature)),
+    ("fp16", Some(sym::aarch64_target_feature)),
+    ("rcpc", Some(sym::aarch64_target_feature)),
+    ("dotprod", Some(sym::aarch64_target_feature)),
+    ("v8.1a", Some(sym::aarch64_target_feature)),
+    ("v8.2a", Some(sym::aarch64_target_feature)),
+    ("v8.3a", Some(sym::aarch64_target_feature)),
 ];
 
-const X86_WHITELIST: &[(&str, Option<&str>)] = &[
+const X86_WHITELIST: &[(&str, Option<Symbol>)] = &[
+    ("adx", Some(sym::adx_target_feature)),
     ("aes", None),
     ("avx", None),
     ("avx2", None),
-    ("avx512bw", Some("avx512_target_feature")),
-    ("avx512cd", Some("avx512_target_feature")),
-    ("avx512dq", Some("avx512_target_feature")),
-    ("avx512er", Some("avx512_target_feature")),
-    ("avx512f", Some("avx512_target_feature")),
-    ("avx512ifma", Some("avx512_target_feature")),
-    ("avx512pf", Some("avx512_target_feature")),
-    ("avx512vbmi", Some("avx512_target_feature")),
-    ("avx512vl", Some("avx512_target_feature")),
-    ("avx512vpopcntdq", Some("avx512_target_feature")),
+    ("avx512bw", Some(sym::avx512_target_feature)),
+    ("avx512cd", Some(sym::avx512_target_feature)),
+    ("avx512dq", Some(sym::avx512_target_feature)),
+    ("avx512er", Some(sym::avx512_target_feature)),
+    ("avx512f", Some(sym::avx512_target_feature)),
+    ("avx512ifma", Some(sym::avx512_target_feature)),
+    ("avx512pf", Some(sym::avx512_target_feature)),
+    ("avx512vbmi", Some(sym::avx512_target_feature)),
+    ("avx512vl", Some(sym::avx512_target_feature)),
+    ("avx512vpopcntdq", Some(sym::avx512_target_feature)),
     ("bmi1", None),
     ("bmi2", None),
+    ("cmpxchg16b", Some(sym::cmpxchg16b_target_feature)),
+    ("f16c", Some(sym::f16c_target_feature)),
     ("fma", None),
     ("fxsr", None),
     ("lzcnt", None),
-    ("mmx", Some("mmx_target_feature")),
+    ("mmx", Some(sym::mmx_target_feature)),
+    ("movbe", Some(sym::movbe_target_feature)),
     ("pclmulqdq", None),
     ("popcnt", None),
     ("rdrand", None),
     ("rdseed", None),
+    ("rtm", Some(sym::rtm_target_feature)),
     ("sha", None),
     ("sse", None),
     ("sse2", None),
     ("sse3", None),
     ("sse4.1", None),
     ("sse4.2", None),
-    ("sse4a", Some("sse4a_target_feature")),
+    ("sse4a", Some(sym::sse4a_target_feature)),
     ("ssse3", None),
-    ("tbm", Some("tbm_target_feature")),
+    ("tbm", Some(sym::tbm_target_feature)),
     ("xsave", None),
     ("xsavec", None),
     ("xsaveopt", None),
     ("xsaves", None),
 ];
 
-const HEXAGON_WHITELIST: &[(&str, Option<&str>)] = &[
-    ("hvx", Some("hexagon_target_feature")),
-    ("hvx-double", Some("hexagon_target_feature")),
+const HEXAGON_WHITELIST: &[(&str, Option<Symbol>)] = &[
+    ("hvx", Some(sym::hexagon_target_feature)),
+    ("hvx-length128b", Some(sym::hexagon_target_feature)),
 ];
 
-const POWERPC_WHITELIST: &[(&str, Option<&str>)] = &[
-    ("altivec", Some("powerpc_target_feature")),
-    ("power8-altivec", Some("powerpc_target_feature")),
-    ("power9-altivec", Some("powerpc_target_feature")),
-    ("power8-vector", Some("powerpc_target_feature")),
-    ("power9-vector", Some("powerpc_target_feature")),
-    ("vsx", Some("powerpc_target_feature")),
+const POWERPC_WHITELIST: &[(&str, Option<Symbol>)] = &[
+    ("altivec", Some(sym::powerpc_target_feature)),
+    ("power8-altivec", Some(sym::powerpc_target_feature)),
+    ("power9-altivec", Some(sym::powerpc_target_feature)),
+    ("power8-vector", Some(sym::powerpc_target_feature)),
+    ("power9-vector", Some(sym::powerpc_target_feature)),
+    ("vsx", Some(sym::powerpc_target_feature)),
 ];
 
-const MIPS_WHITELIST: &[(&str, Option<&str>)] = &[
-    ("fp64", Some("mips_target_feature")),
-    ("msa", Some("mips_target_feature")),
-];
+const MIPS_WHITELIST: &[(&str, Option<Symbol>)] =
+    &[("fp64", Some(sym::mips_target_feature)), ("msa", Some(sym::mips_target_feature))];
 
-const WASM_WHITELIST: &[(&str, Option<&str>)] = &[
-    ("simd128", Some("wasm_target_feature")),
-];
+const WASM_WHITELIST: &[(&str, Option<Symbol>)] =
+    &[("simd128", Some(sym::wasm_target_feature)), ("atomics", Some(sym::wasm_target_feature))];
 
 /// When rustdoc is running, provide a list of all known features so that all their respective
-/// primtives may be documented.
+/// primitives may be documented.
 ///
 /// IMPORTANT: If you're adding another whitelist to the above lists, make sure to add it to this
 /// iterator!
-pub fn all_known_features() -> impl Iterator<Item=(&'static str, Option<&'static str>)> {
-    ARM_WHITELIST.iter().cloned()
+pub fn all_known_features() -> impl Iterator<Item = (&'static str, Option<Symbol>)> {
+    ARM_WHITELIST
+        .iter()
+        .cloned()
         .chain(AARCH64_WHITELIST.iter().cloned())
         .chain(X86_WHITELIST.iter().cloned())
         .chain(HEXAGON_WHITELIST.iter().cloned())
@@ -189,15 +244,12 @@ pub fn all_known_features() -> impl Iterator<Item=(&'static str, Option<&'static
 }
 
 pub fn to_llvm_feature<'a>(sess: &Session, s: &'a str) -> &'a str {
-    let arch = if sess.target.target.arch == "x86_64" {
-        "x86"
-    } else {
-        &*sess.target.target.arch
-    };
+    let arch = if sess.target.target.arch == "x86_64" { "x86" } else { &*sess.target.target.arch };
     match (arch, s) {
         ("x86", "pclmulqdq") => "pclmul",
         ("x86", "rdrand") => "rdrnd",
         ("x86", "bmi1") => "bmi",
+        ("x86", "cmpxchg16b") => "cx16",
         ("aarch64", "fp") => "fp-armv8",
         ("aarch64", "fp16") => "fullfp16",
         (_, s) => s,
@@ -205,7 +257,7 @@ pub fn to_llvm_feature<'a>(sess: &Session, s: &'a str) -> &'a str {
 }
 
 pub fn target_features(sess: &Session) -> Vec<Symbol> {
-    let target_machine = create_target_machine(sess, true);
+    let target_machine = create_informational_target_machine(sess, true);
     target_feature_whitelist(sess)
         .iter()
         .filter_map(|&(feature, gate)| {
@@ -220,12 +272,11 @@ pub fn target_features(sess: &Session) -> Vec<Symbol> {
             let cstr = CString::new(llvm_feature).unwrap();
             unsafe { llvm::LLVMRustHasFeature(target_machine, cstr.as_ptr()) }
         })
-        .map(|feature| Symbol::intern(feature)).collect()
+        .map(|feature| Symbol::intern(feature))
+        .collect()
 }
 
-pub fn target_feature_whitelist(sess: &Session)
-    -> &'static [(&'static str, Option<&'static str>)]
-{
+pub fn target_feature_whitelist(sess: &Session) -> &'static [(&'static str, Option<Symbol>)] {
     match &*sess.target.target.arch {
         "arm" => ARM_WHITELIST,
         "aarch64" => AARCH64_WHITELIST,
@@ -241,24 +292,45 @@ pub fn target_feature_whitelist(sess: &Session)
 pub fn print_version() {
     // Can be called without initializing LLVM
     unsafe {
-        println!("LLVM version: {}.{}",
-                 llvm::LLVMRustVersionMajor(), llvm::LLVMRustVersionMinor());
+        println!("LLVM version: {}.{}", llvm::LLVMRustVersionMajor(), llvm::LLVMRustVersionMinor());
     }
+}
+
+pub fn get_major_version() -> u32 {
+    unsafe { llvm::LLVMRustVersionMajor() }
 }
 
 pub fn print_passes() {
     // Can be called without initializing LLVM
-    unsafe { llvm::LLVMRustPrintPasses(); }
+    unsafe {
+        llvm::LLVMRustPrintPasses();
+    }
 }
 
 pub(crate) fn print(req: PrintRequest, sess: &Session) {
     require_inited();
-    let tm = create_target_machine(sess, true);
+    let tm = create_informational_target_machine(sess, true);
     unsafe {
         match req {
             PrintRequest::TargetCPUs => llvm::LLVMRustPrintTargetCPUs(tm),
             PrintRequest::TargetFeatures => llvm::LLVMRustPrintTargetFeatures(tm),
             _ => bug!("rustc_codegen_llvm can't handle print request: {:?}", req),
         }
+    }
+}
+
+pub fn target_cpu(sess: &Session) -> &str {
+    let name = match sess.opts.cg.target_cpu {
+        Some(ref s) => &**s,
+        None => &*sess.target.target.options.cpu,
+    };
+    if name != "native" {
+        return name;
+    }
+
+    unsafe {
+        let mut len = 0;
+        let ptr = llvm::LLVMRustGetHostCPUName(&mut len);
+        str::from_utf8(slice::from_raw_parts(ptr as *const u8, len)).unwrap()
     }
 }

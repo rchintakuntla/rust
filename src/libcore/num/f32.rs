@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! This module provides constants which are specific to the implementation
 //! of the `f32` floating point data type.
 //!
@@ -17,8 +7,11 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use mem;
-use num::FpCategory;
+use crate::convert::FloatToInt;
+#[cfg(not(test))]
+use crate::intrinsics;
+use crate::mem;
+use crate::num::FpCategory;
 
 /// The radix or base of the internal representation of `f32`.
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -33,11 +26,11 @@ pub const DIGITS: u32 = 6;
 
 /// [Machine epsilon] value for `f32`.
 ///
-/// This is the difference between `1.0` and the next largest representable number.
+/// This is the difference between `1.0` and the next larger representable number.
 ///
 /// [Machine epsilon]: https://en.wikipedia.org/wiki/Machine_epsilon
 #[stable(feature = "rust1", since = "1.0.0")]
-pub const EPSILON: f32 = 1.19209290e-07_f32;
+pub const EPSILON: f32 = 1.1920929e-7_f32;
 
 /// Smallest finite `f32` value.
 #[stable(feature = "rust1", since = "1.0.0")]
@@ -69,7 +62,7 @@ pub const NAN: f32 = 0.0_f32 / 0.0_f32;
 /// Infinity (∞).
 #[stable(feature = "rust1", since = "1.0.0")]
 pub const INFINITY: f32 = 1.0_f32 / 0.0_f32;
-/// Negative infinity (-∞).
+/// Negative infinity (−∞).
 #[stable(feature = "rust1", since = "1.0.0")]
 pub const NEG_INFINITY: f32 = -1.0_f32 / 0.0_f32;
 
@@ -81,6 +74,12 @@ pub mod consts {
     /// Archimedes' constant (π)
     #[stable(feature = "rust1", since = "1.0.0")]
     pub const PI: f32 = 3.14159265358979323846264338327950288_f32;
+
+    /// The full circle constant (τ)
+    ///
+    /// Equal to 2π.
+    #[unstable(feature = "tau_constant", issue = "66770")]
+    pub const TAU: f32 = 6.28318530717958647692528676655900577_f32;
 
     /// π/2
     #[stable(feature = "rust1", since = "1.0.0")]
@@ -154,7 +153,7 @@ pub mod consts {
 #[lang = "f32"]
 #[cfg(not(test))]
 impl f32 {
-    /// Returns `true` if this value is `NaN` and false otherwise.
+    /// Returns `true` if this value is `NaN`.
     ///
     /// ```
     /// use std::f32;
@@ -171,8 +170,16 @@ impl f32 {
         self != self
     }
 
-    /// Returns `true` if this value is positive infinity or negative infinity and
-    /// false otherwise.
+    // FIXME(#50145): `abs` is publicly unavailable in libcore due to
+    // concerns about portability, so this implementation is for
+    // private use internally.
+    #[inline]
+    fn abs_private(self) -> f32 {
+        f32::from_bits(self.to_bits() & 0x7fff_ffff)
+    }
+
+    /// Returns `true` if this value is positive infinity or negative infinity, and
+    /// `false` otherwise.
     ///
     /// ```
     /// use std::f32;
@@ -191,7 +198,7 @@ impl f32 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn is_infinite(self) -> bool {
-        self == INFINITY || self == NEG_INFINITY
+        self.abs_private() == INFINITY
     }
 
     /// Returns `true` if this number is neither infinite nor `NaN`.
@@ -213,11 +220,13 @@ impl f32 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn is_finite(self) -> bool {
-        !(self.is_nan() || self.is_infinite())
+        // There's no need to handle NaN separately: if self is NaN,
+        // the comparison is not true, exactly as desired.
+        self.abs_private() < INFINITY
     }
 
     /// Returns `true` if the number is neither zero, infinite,
-    /// [subnormal][subnormal], or `NaN`.
+    /// [subnormal], or `NaN`.
     ///
     /// ```
     /// use std::f32;
@@ -272,7 +281,7 @@ impl f32 {
         }
     }
 
-    /// Returns `true` if and only if `self` has a positive sign, including `+0.0`, `NaN`s with
+    /// Returns `true` if `self` has a positive sign, including `+0.0`, `NaN`s with
     /// positive sign bit and positive infinity.
     ///
     /// ```
@@ -288,7 +297,7 @@ impl f32 {
         !self.is_sign_negative()
     }
 
-    /// Returns `true` if and only if `self` has a negative sign, including `-0.0`, `NaN`s with
+    /// Returns `true` if `self` has a negative sign, including `-0.0`, `NaN`s with
     /// negative sign bit and negative infinity.
     ///
     /// ```
@@ -312,7 +321,7 @@ impl f32 {
     /// use std::f32;
     ///
     /// let x = 2.0_f32;
-    /// let abs_difference = (x.recip() - (1.0/x)).abs();
+    /// let abs_difference = (x.recip() - (1.0 / x)).abs();
     ///
     /// assert!(abs_difference <= f32::EPSILON);
     /// ```
@@ -333,7 +342,7 @@ impl f32 {
     ///
     /// assert!(abs_difference <= f32::EPSILON);
     /// ```
-    #[stable(feature = "f32_deg_rad_conversions", since="1.7.0")]
+    #[stable(feature = "f32_deg_rad_conversions", since = "1.7.0")]
     #[inline]
     pub fn to_degrees(self) -> f32 {
         // Use a constant for better precision.
@@ -352,7 +361,7 @@ impl f32 {
     ///
     /// assert!(abs_difference <= f32::EPSILON);
     /// ```
-    #[stable(feature = "f32_deg_rad_conversions", since="1.7.0")]
+    #[stable(feature = "f32_deg_rad_conversions", since = "1.7.0")]
     #[inline]
     pub fn to_radians(self) -> f32 {
         let value: f32 = consts::PI;
@@ -372,15 +381,7 @@ impl f32 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn max(self, other: f32) -> f32 {
-        // IEEE754 says: maxNum(x, y) is the canonicalized number y if x < y, x if y < x, the
-        // canonicalized number if one operand is a number and the other a quiet NaN. Otherwise it
-        // is either x or y, canonicalized (this means results might differ among implementations).
-        // When either x or y is a signalingNaN, then the result is according to 6.2.
-        //
-        // Since we do not support sNaN in Rust yet, we do not need to handle them.
-        // FIXME(nagisa): due to https://bugs.llvm.org/show_bug.cgi?id=33303 we canonicalize by
-        // multiplying by 1.0. Should switch to the `canonicalize` when it works.
-        (if self.is_nan() || self < other { other } else { self }) * 1.0
+        intrinsics::maxnumf32(self, other)
     }
 
     /// Returns the minimum of the two numbers.
@@ -396,15 +397,38 @@ impl f32 {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn min(self, other: f32) -> f32 {
-        // IEEE754 says: minNum(x, y) is the canonicalized number x if x < y, y if y < x, the
-        // canonicalized number if one operand is a number and the other a quiet NaN. Otherwise it
-        // is either x or y, canonicalized (this means results might differ among implementations).
-        // When either x or y is a signalingNaN, then the result is according to 6.2.
-        //
-        // Since we do not support sNaN in Rust yet, we do not need to handle them.
-        // FIXME(nagisa): due to https://bugs.llvm.org/show_bug.cgi?id=33303 we canonicalize by
-        // multiplying by 1.0. Should switch to the `canonicalize` when it works.
-        (if other.is_nan() || self < other { self } else { other }) * 1.0
+        intrinsics::minnumf32(self, other)
+    }
+
+    /// Rounds toward zero and converts to any primitive integer type,
+    /// assuming that the value is finite and fits in that type.
+    ///
+    /// ```
+    /// #![feature(float_approx_unchecked_to)]
+    ///
+    /// let value = 4.6_f32;
+    /// let rounded = unsafe { value.approx_unchecked_to::<u16>() };
+    /// assert_eq!(rounded, 4);
+    ///
+    /// let value = -128.9_f32;
+    /// let rounded = unsafe { value.approx_unchecked_to::<i8>() };
+    /// assert_eq!(rounded, std::i8::MIN);
+    /// ```
+    ///
+    /// # Safety
+    ///
+    /// The value must:
+    ///
+    /// * Not be `NaN`
+    /// * Not be infinite
+    /// * Be representable in the return type `Int`, after truncating off its fractional part
+    #[unstable(feature = "float_approx_unchecked_to", issue = "67058")]
+    #[inline]
+    pub unsafe fn approx_unchecked_to<Int>(self) -> Int
+    where
+        Self: FloatToInt<Int>,
+    {
+        FloatToInt::<Int>::approx_unchecked(self)
     }
 
     /// Raw transmutation to `u32`.
@@ -427,6 +451,7 @@ impl f32 {
     #[stable(feature = "float_bits_conv", since = "1.20.0")]
     #[inline]
     pub fn to_bits(self) -> u32 {
+        // SAFETY: `u32` is a plain old datatype so we can always transmute to it
         unsafe { mem::transmute(self) }
     }
 
@@ -445,7 +470,7 @@ impl f32 {
     /// signaling NaNs on MIPS are quiet NaNs on x86, and vice-versa.
     ///
     /// Rather than trying to preserve signaling-ness cross-platform, this
-    /// implementation favours preserving the exact bits. This means that
+    /// implementation favors preserving the exact bits. This means that
     /// any payloads encoded in NaNs will be preserved even if the result of
     /// this method is sent over the network from an x86 machine to a MIPS one.
     ///
@@ -463,15 +488,125 @@ impl f32 {
     /// # Examples
     ///
     /// ```
-    /// use std::f32;
     /// let v = f32::from_bits(0x41480000);
-    /// let difference = (v - 12.5).abs();
-    /// assert!(difference <= 1e-5);
+    /// assert_eq!(v, 12.5);
     /// ```
     #[stable(feature = "float_bits_conv", since = "1.20.0")]
     #[inline]
     pub fn from_bits(v: u32) -> Self {
+        // SAFETY: `u32` is a plain old datatype so we can always transmute from it
         // It turns out the safety issues with sNaN were overblown! Hooray!
         unsafe { mem::transmute(v) }
+    }
+
+    /// Return the memory representation of this floating point number as a byte array in
+    /// big-endian (network) byte order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = 12.5f32.to_be_bytes();
+    /// assert_eq!(bytes, [0x41, 0x48, 0x00, 0x00]);
+    /// ```
+    #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
+    #[inline]
+    pub fn to_be_bytes(self) -> [u8; 4] {
+        self.to_bits().to_be_bytes()
+    }
+
+    /// Return the memory representation of this floating point number as a byte array in
+    /// little-endian byte order.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = 12.5f32.to_le_bytes();
+    /// assert_eq!(bytes, [0x00, 0x00, 0x48, 0x41]);
+    /// ```
+    #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
+    #[inline]
+    pub fn to_le_bytes(self) -> [u8; 4] {
+        self.to_bits().to_le_bytes()
+    }
+
+    /// Return the memory representation of this floating point number as a byte array in
+    /// native byte order.
+    ///
+    /// As the target platform's native endianness is used, portable code
+    /// should use [`to_be_bytes`] or [`to_le_bytes`], as appropriate, instead.
+    ///
+    /// [`to_be_bytes`]: #method.to_be_bytes
+    /// [`to_le_bytes`]: #method.to_le_bytes
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let bytes = 12.5f32.to_ne_bytes();
+    /// assert_eq!(
+    ///     bytes,
+    ///     if cfg!(target_endian = "big") {
+    ///         [0x41, 0x48, 0x00, 0x00]
+    ///     } else {
+    ///         [0x00, 0x00, 0x48, 0x41]
+    ///     }
+    /// );
+    /// ```
+    #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
+    #[inline]
+    pub fn to_ne_bytes(self) -> [u8; 4] {
+        self.to_bits().to_ne_bytes()
+    }
+
+    /// Create a floating point value from its representation as a byte array in big endian.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let value = f32::from_be_bytes([0x41, 0x48, 0x00, 0x00]);
+    /// assert_eq!(value, 12.5);
+    /// ```
+    #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
+    #[inline]
+    pub fn from_be_bytes(bytes: [u8; 4]) -> Self {
+        Self::from_bits(u32::from_be_bytes(bytes))
+    }
+
+    /// Create a floating point value from its representation as a byte array in little endian.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let value = f32::from_le_bytes([0x00, 0x00, 0x48, 0x41]);
+    /// assert_eq!(value, 12.5);
+    /// ```
+    #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
+    #[inline]
+    pub fn from_le_bytes(bytes: [u8; 4]) -> Self {
+        Self::from_bits(u32::from_le_bytes(bytes))
+    }
+
+    /// Create a floating point value from its representation as a byte array in native endian.
+    ///
+    /// As the target platform's native endianness is used, portable code
+    /// likely wants to use [`from_be_bytes`] or [`from_le_bytes`], as
+    /// appropriate instead.
+    ///
+    /// [`from_be_bytes`]: #method.from_be_bytes
+    /// [`from_le_bytes`]: #method.from_le_bytes
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let value = f32::from_ne_bytes(if cfg!(target_endian = "big") {
+    ///     [0x41, 0x48, 0x00, 0x00]
+    /// } else {
+    ///     [0x00, 0x00, 0x48, 0x41]
+    /// });
+    /// assert_eq!(value, 12.5);
+    /// ```
+    #[stable(feature = "float_to_from_bytes", since = "1.40.0")]
+    #[inline]
+    pub fn from_ne_bytes(bytes: [u8; 4]) -> Self {
+        Self::from_bits(u32::from_ne_bytes(bytes))
     }
 }

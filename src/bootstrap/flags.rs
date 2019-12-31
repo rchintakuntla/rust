@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Command-line interface of the rustbuild build system.
 //!
 //! This module implements the command-line parsing of the build system which
@@ -19,12 +9,12 @@ use std::process;
 
 use getopts::Options;
 
-use builder::Builder;
-use config::Config;
-use metadata;
-use {Build, DocTests};
+use crate::builder::Builder;
+use crate::config::Config;
+use crate::metadata;
+use crate::{Build, DocTests};
 
-use cache::{Interned, INTERNER};
+use crate::cache::{Interned, INTERNER};
 
 /// Deserialized version of all flags for this compile.
 pub struct Flags {
@@ -43,8 +33,11 @@ pub struct Flags {
     pub rustc_error_format: Option<String>,
     pub dry_run: bool,
 
-    // true => deny
-    pub warnings: Option<bool>,
+    // This overrides the deny-warnings configuation option,
+    // which passes -Dwarnings to the compiler invocations.
+    //
+    // true => deny, false => warn
+    pub deny_warnings: Option<bool>,
 }
 
 pub enum Subcommand {
@@ -54,6 +47,15 @@ pub enum Subcommand {
     Check {
         paths: Vec<PathBuf>,
     },
+    Clippy {
+        paths: Vec<PathBuf>,
+    },
+    Fix {
+        paths: Vec<PathBuf>,
+    },
+    Format {
+        check: bool,
+    },
     Doc {
         paths: Vec<PathBuf>,
     },
@@ -62,10 +64,12 @@ pub enum Subcommand {
         /// Whether to automatically update stderr/stdout files
         bless: bool,
         compare_mode: Option<String>,
+        pass: Option<String>,
         test_args: Vec<String>,
         rustc_args: Vec<String>,
         fail_fast: bool,
         doc_tests: DocTests,
+        rustfix_coverage: bool,
     },
     Bench {
         paths: Vec<PathBuf>,
@@ -84,22 +88,23 @@ pub enum Subcommand {
 
 impl Default for Subcommand {
     fn default() -> Subcommand {
-        Subcommand::Build {
-            paths: vec![PathBuf::from("nowhere")],
-        }
+        Subcommand::Build { paths: vec![PathBuf::from("nowhere")] }
     }
 }
 
 impl Flags {
     pub fn parse(args: &[String]) -> Flags {
         let mut extra_help = String::new();
-        let mut subcommand_help = format!(
+        let mut subcommand_help = String::from(
             "\
 Usage: x.py <subcommand> [options] [<paths>...]
 
 Subcommands:
     build       Compile either the compiler or libraries
     check       Compile either the compiler or libraries, using cargo check
+    clippy      Run clippy
+    fix         Run cargo fix
+    fmt         Run rustfmt
     test        Build and run some test suites
     bench       Build and run some benchmarks
     doc         Build documentation
@@ -107,7 +112,7 @@ Subcommands:
     dist        Build distribution artifacts
     install     Install distribution artifacts
 
-To learn more about a subcommand, run `./x.py <subcommand> -h`"
+To learn more about a subcommand, run `./x.py <subcommand> -h`",
         );
 
         let mut opts = Options::new();
@@ -121,11 +126,20 @@ To learn more about a subcommand, run `./x.py <subcommand> -h`"
         opts.optmulti("", "exclude", "build paths to exclude", "PATH");
         opts.optopt("", "on-fail", "command to run on failure", "CMD");
         opts.optflag("", "dry-run", "dry run; don't build anything");
-        opts.optopt("", "stage",
-            "stage to build (indicates compiler to use/test, e.g. stage 0 uses the \
+        opts.optopt(
+            "",
+            "stage",
+            "stage to build (indicates compiler to use/test, e.g., stage 0 uses the \
              bootstrap compiler, stage 1 the stage 0 rustc artifacts, etc.)",
-            "N");
-        opts.optmulti("", "keep-stage", "stage(s) to keep without recompiling", "N");
+            "N",
+        );
+        opts.optmulti(
+            "",
+            "keep-stage",
+            "stage(s) to keep without recompiling \
+            (pass multiple times to keep e.g., both stages 0 and 1)",
+            "N",
+        );
         opts.optopt("", "src", "path to the root of the rust checkout", "DIR");
         opts.optopt("j", "jobs", "number of jobs to run in parallel", "JOBS");
         opts.optflag("h", "help", "print this help message");
@@ -155,6 +169,9 @@ To learn more about a subcommand, run `./x.py <subcommand> -h`"
         let subcommand = args.iter().find(|&s| {
             (s == "build")
                 || (s == "check")
+                || (s == "clippy")
+                || (s == "fix")
+                || (s == "fmt")
                 || (s == "test")
                 || (s == "bench")
                 || (s == "doc")
@@ -187,16 +204,24 @@ To learn more about a subcommand, run `./x.py <subcommand> -h`"
                 );
                 opts.optflag("", "no-doc", "do not run doc tests");
                 opts.optflag("", "doc", "only run doc tests");
-                opts.optflag(
-                    "",
-                    "bless",
-                    "update all stderr/stdout files of failing ui tests",
-                );
+                opts.optflag("", "bless", "update all stderr/stdout files of failing ui tests");
                 opts.optopt(
                     "",
                     "compare-mode",
                     "mode describing what file the actual ui output will be compared to",
                     "COMPARE MODE",
+                );
+                opts.optopt(
+                    "",
+                    "pass",
+                    "force {check,build,run}-pass tests to this mode.",
+                    "check | build | run",
+                );
+                opts.optflag(
+                    "",
+                    "rustfix-coverage",
+                    "enable this to generate a Rustfix coverage file, which is saved in \
+                        `/<build_base>/rustfix_missing_coverage.txt`",
                 );
             }
             "bench" => {
@@ -204,6 +229,9 @@ To learn more about a subcommand, run `./x.py <subcommand> -h`"
             }
             "clean" => {
                 opts.optflag("", "all", "clean all build artifacts");
+            }
+            "fmt" => {
+                opts.optflag("", "check", "check formatting instead of applying.");
             }
             _ => {}
         };
@@ -284,6 +312,39 @@ Arguments:
     the compiler.",
                 );
             }
+            "clippy" => {
+                subcommand_help.push_str(
+                    "\n
+Arguments:
+    This subcommand accepts a number of paths to directories to the crates
+    and/or artifacts to run clippy against. For example:
+
+        ./x.py clippy src/libcore
+        ./x.py clippy src/libcore src/libproc_macro",
+                );
+            }
+            "fix" => {
+                subcommand_help.push_str(
+                    "\n
+Arguments:
+    This subcommand accepts a number of paths to directories to the crates
+    and/or artifacts to run `cargo fix` against. For example:
+
+        ./x.py fix src/libcore
+        ./x.py fix src/libcore src/libproc_macro",
+                );
+            }
+            "fmt" => {
+                subcommand_help.push_str(
+                    "\n
+Arguments:
+    This subcommand optionally accepts a `--check` flag which succeeds if formatting is correct and
+    fails if it is not. For example:
+
+        ./x.py fmt
+        ./x.py fmt --check",
+                );
+            }
             "test" => {
                 subcommand_help.push_str(
                     "\n
@@ -291,7 +352,7 @@ Arguments:
     This subcommand accepts a number of paths to directories to tests that
     should be compiled and run. For example:
 
-        ./x.py test src/test/run-pass
+        ./x.py test src/test/ui
         ./x.py test src/libstd --test-args hash_map
         ./x.py test src/libstd --stage 0 --no-doc
         ./x.py test src/test/ui --bless
@@ -328,10 +389,7 @@ Arguments:
             _ => {}
         };
         // Get any optional paths which occur after the subcommand
-        let paths = matches.free[1..]
-            .iter()
-            .map(|p| p.into())
-            .collect::<Vec<PathBuf>>();
+        let paths = matches.free[1..].iter().map(|p| p.into()).collect::<Vec<PathBuf>>();
 
         let cfg_file = matches.opt_str("config").map(PathBuf::from).or_else(|| {
             if fs::metadata("config.toml").is_ok() {
@@ -349,12 +407,10 @@ Arguments:
 
             let maybe_rules_help = Builder::get_help(&build, subcommand.as_str());
             extra_help.push_str(maybe_rules_help.unwrap_or_default().as_str());
-        } else if subcommand.as_str() != "clean" {
+        } else if !(subcommand.as_str() == "clean" || subcommand.as_str() == "fmt") {
             extra_help.push_str(
-                format!(
-                    "Run `./x.py {} -h -v` to see a list of available paths.",
-                    subcommand
-                ).as_str(),
+                format!("Run `./x.py {} -h -v` to see a list of available paths.", subcommand)
+                    .as_str(),
             );
         }
 
@@ -364,15 +420,19 @@ Arguments:
         }
 
         let cmd = match subcommand.as_str() {
-            "build" => Subcommand::Build { paths: paths },
-            "check" => Subcommand::Check { paths: paths },
+            "build" => Subcommand::Build { paths },
+            "check" => Subcommand::Check { paths },
+            "clippy" => Subcommand::Clippy { paths },
+            "fix" => Subcommand::Fix { paths },
             "test" => Subcommand::Test {
                 paths,
                 bless: matches.opt_present("bless"),
                 compare_mode: matches.opt_str("compare-mode"),
+                pass: matches.opt_str("pass"),
                 test_args: matches.opt_strs("test-args"),
                 rustc_args: matches.opt_strs("rustc-args"),
                 fail_fast: !matches.opt_present("no-fail-fast"),
+                rustfix_coverage: matches.opt_present("rustfix-coverage"),
                 doc_tests: if matches.opt_present("doc") {
                     DocTests::Only
                 } else if matches.opt_present("no-doc") {
@@ -381,21 +441,17 @@ Arguments:
                     DocTests::Yes
                 },
             },
-            "bench" => Subcommand::Bench {
-                paths,
-                test_args: matches.opt_strs("test-args"),
-            },
-            "doc" => Subcommand::Doc { paths: paths },
+            "bench" => Subcommand::Bench { paths, test_args: matches.opt_strs("test-args") },
+            "doc" => Subcommand::Doc { paths },
             "clean" => {
-                if paths.len() > 0 {
+                if !paths.is_empty() {
                     println!("\nclean does not take a path argument\n");
                     usage(1, &opts, &subcommand_help, &extra_help);
                 }
 
-                Subcommand::Clean {
-                    all: matches.opt_present("all"),
-                }
+                Subcommand::Clean { all: matches.opt_present("all") }
             }
+            "fmt" => Subcommand::Format { check: matches.opt_present("check") },
             "dist" => Subcommand::Dist { paths },
             "install" => Subcommand::Install { paths },
             _ => {
@@ -405,30 +461,32 @@ Arguments:
 
         Flags {
             verbose: matches.opt_count("verbose"),
-            stage: matches.opt_str("stage").map(|j| j.parse().unwrap()),
+            stage: matches.opt_str("stage").map(|j| j.parse().expect("`stage` should be a number")),
             dry_run: matches.opt_present("dry-run"),
             on_fail: matches.opt_str("on-fail"),
             rustc_error_format: matches.opt_str("error-format"),
-            keep_stage: matches.opt_strs("keep-stage")
-                .into_iter().map(|j| j.parse().unwrap())
+            keep_stage: matches
+                .opt_strs("keep-stage")
+                .into_iter()
+                .map(|j| j.parse().expect("`keep-stage` should be a number"))
                 .collect(),
-            host: split(matches.opt_strs("host"))
+            host: split(&matches.opt_strs("host"))
                 .into_iter()
                 .map(|x| INTERNER.intern_string(x))
                 .collect::<Vec<_>>(),
-            target: split(matches.opt_strs("target"))
+            target: split(&matches.opt_strs("target"))
                 .into_iter()
                 .map(|x| INTERNER.intern_string(x))
                 .collect::<Vec<_>>(),
             config: cfg_file,
-            jobs: matches.opt_str("jobs").map(|j| j.parse().unwrap()),
+            jobs: matches.opt_str("jobs").map(|j| j.parse().expect("`jobs` should be a number")),
             cmd,
             incremental: matches.opt_present("incremental"),
-            exclude: split(matches.opt_strs("exclude"))
+            exclude: split(&matches.opt_strs("exclude"))
                 .into_iter()
                 .map(|p| p.into())
                 .collect::<Vec<_>>(),
-            warnings: matches.opt_str("warnings").map(|v| v == "deny"),
+            deny_warnings: parse_deny_warnings(&matches),
         }
     }
 }
@@ -437,10 +495,7 @@ impl Subcommand {
     pub fn test_args(&self) -> Vec<&str> {
         match *self {
             Subcommand::Test { ref test_args, .. } | Subcommand::Bench { ref test_args, .. } => {
-                test_args
-                    .iter()
-                    .flat_map(|s| s.split_whitespace())
-                    .collect()
+                test_args.iter().flat_map(|s| s.split_whitespace()).collect()
             }
             _ => Vec::new(),
         }
@@ -448,10 +503,9 @@ impl Subcommand {
 
     pub fn rustc_args(&self) -> Vec<&str> {
         match *self {
-            Subcommand::Test { ref rustc_args, .. } => rustc_args
-                .iter()
-                .flat_map(|s| s.split_whitespace())
-                .collect(),
+            Subcommand::Test { ref rustc_args, .. } => {
+                rustc_args.iter().flat_map(|s| s.split_whitespace()).collect()
+            }
             _ => Vec::new(),
         }
     }
@@ -477,19 +531,40 @@ impl Subcommand {
         }
     }
 
+    pub fn rustfix_coverage(&self) -> bool {
+        match *self {
+            Subcommand::Test { rustfix_coverage, .. } => rustfix_coverage,
+            _ => false,
+        }
+    }
+
     pub fn compare_mode(&self) -> Option<&str> {
         match *self {
-            Subcommand::Test {
-                ref compare_mode, ..
-            } => compare_mode.as_ref().map(|s| &s[..]),
+            Subcommand::Test { ref compare_mode, .. } => compare_mode.as_ref().map(|s| &s[..]),
+            _ => None,
+        }
+    }
+
+    pub fn pass(&self) -> Option<&str> {
+        match *self {
+            Subcommand::Test { ref pass, .. } => pass.as_ref().map(|s| &s[..]),
             _ => None,
         }
     }
 }
 
-fn split(s: Vec<String>) -> Vec<String> {
-    s.iter()
-        .flat_map(|s| s.split(','))
-        .map(|s| s.to_string())
-        .collect()
+fn split(s: &[String]) -> Vec<String> {
+    s.iter().flat_map(|s| s.split(',')).map(|s| s.to_string()).collect()
+}
+
+fn parse_deny_warnings(matches: &getopts::Matches) -> Option<bool> {
+    match matches.opt_str("warnings").as_ref().map(|v| v.as_str()) {
+        Some("deny") => Some(true),
+        Some("warn") => Some(false),
+        Some(value) => {
+            eprintln!(r#"invalid value for --warnings: {:?}, expected "warn" or "deny""#, value,);
+            process::exit(1);
+        }
+        None => None,
+    }
 }

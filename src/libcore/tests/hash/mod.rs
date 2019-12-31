@@ -1,17 +1,7 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 mod sip;
 
-use std::hash::{Hash, Hasher};
 use std::default::Default;
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 struct MyHasher {
@@ -30,9 +20,10 @@ impl Hasher for MyHasher {
             self.hash += *byte as u64;
         }
     }
-    fn finish(&self) -> u64 { self.hash }
+    fn finish(&self) -> u64 {
+        self.hash
+    }
 }
-
 
 #[test]
 fn test_writer_hasher() {
@@ -62,23 +53,28 @@ fn test_writer_hasher() {
     assert_eq!(hash(&'a'), 97);
 
     let s: &str = "a";
-    assert_eq!(hash(& s), 97 + 0xFF);
+    assert_eq!(hash(&s), 97 + 0xFF);
     let s: Box<str> = String::from("a").into_boxed_str();
-    assert_eq!(hash(& s), 97 + 0xFF);
+    assert_eq!(hash(&s), 97 + 0xFF);
     let s: Rc<&str> = Rc::new("a");
     assert_eq!(hash(&s), 97 + 0xFF);
     let cs: &[u8] = &[1, 2, 3];
-    assert_eq!(hash(& cs), 9);
+    assert_eq!(hash(&cs), 9);
     let cs: Box<[u8]> = Box::new([1, 2, 3]);
-    assert_eq!(hash(& cs), 9);
+    assert_eq!(hash(&cs), 9);
     let cs: Rc<[u8]> = Rc::new([1, 2, 3]);
-    assert_eq!(hash(& cs), 9);
+    assert_eq!(hash(&cs), 9);
 
     let ptr = 5_usize as *const i32;
     assert_eq!(hash(&ptr), 5);
 
     let ptr = 5_usize as *mut i32;
     assert_eq!(hash(&ptr), 5);
+
+    if cfg!(miri) {
+        // Miri cannot hash pointers
+        return;
+    }
 
     let cs: &mut [u8] = &mut [1, 2, 3];
     let ptr = cs.as_ptr();
@@ -89,13 +85,23 @@ fn test_writer_hasher() {
     assert_eq!(hash(&slice_ptr), hash(&ptr) + cs.len() as u64);
 }
 
-struct Custom { hash: u64 }
-struct CustomHasher { output: u64 }
+struct Custom {
+    hash: u64,
+}
+struct CustomHasher {
+    output: u64,
+}
 
 impl Hasher for CustomHasher {
-    fn finish(&self) -> u64 { self.output }
-    fn write(&mut self, _: &[u8]) { panic!() }
-    fn write_u64(&mut self, data: u64) { self.output = data; }
+    fn finish(&self) -> u64 {
+        self.output
+    }
+    fn write(&mut self, _: &[u8]) {
+        panic!()
+    }
+    fn write_u64(&mut self, data: u64) {
+        self.output = data;
+    }
 }
 
 impl Default for CustomHasher {

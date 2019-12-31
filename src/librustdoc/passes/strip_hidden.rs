@@ -1,41 +1,34 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use rustc::util::nodemap::DefIdSet;
 use std::mem;
+use syntax::symbol::sym;
 
-use clean::{self, AttributesExt, NestedAttributesExt};
-use clean::Item;
-use core::DocContext;
-use fold;
-use fold::DocFolder;
-use fold::StripItem;
-use passes::{ImplStripper, Pass};
+use crate::clean::Item;
+use crate::clean::{self, AttributesExt, NestedAttributesExt};
+use crate::core::DocContext;
+use crate::fold::{DocFolder, StripItem};
+use crate::passes::{ImplStripper, Pass};
 
-pub const STRIP_HIDDEN: Pass =
-    Pass::early("strip-hidden", strip_hidden,
-                "strips all doc(hidden) items from the output");
+pub const STRIP_HIDDEN: Pass = Pass {
+    name: "strip-hidden",
+    pass: strip_hidden,
+    description: "strips all doc(hidden) items from the output",
+};
 
 /// Strip items marked `#[doc(hidden)]`
-pub fn strip_hidden(krate: clean::Crate, _: &DocContext) -> clean::Crate {
-    let mut retained = DefIdSet();
+pub fn strip_hidden(krate: clean::Crate, _: &DocContext<'_>) -> clean::Crate {
+    let mut retained = DefIdSet::default();
 
     // strip all #[doc(hidden)] items
     let krate = {
-        let mut stripper = Stripper{ retained: &mut retained, update_retained: true };
+        let mut stripper = Stripper { retained: &mut retained, update_retained: true };
         stripper.fold_crate(krate)
     };
 
     // strip all impls referencing stripped items
     let mut stripper = ImplStripper { retained: &retained };
-    stripper.fold_crate(krate)
+    let krate = stripper.fold_crate(krate);
+
+    krate
 }
 
 struct Stripper<'a> {
@@ -43,10 +36,10 @@ struct Stripper<'a> {
     update_retained: bool,
 }
 
-impl<'a> fold::DocFolder for Stripper<'a> {
+impl<'a> DocFolder for Stripper<'a> {
     fn fold_item(&mut self, i: Item) -> Option<Item> {
-        if i.attrs.lists("doc").has_word("hidden") {
-            debug!("found one in strip_hidden; removing");
+        if i.attrs.lists(sym::doc).has_word(sym::hidden) {
+            debug!("strip_hidden: stripping {:?} {:?}", i.type_(), i.name);
             // use a dedicated hidden item for given item type if any
             match i.inner {
                 clean::StructFieldItem(..) | clean::ModuleItem(..) => {

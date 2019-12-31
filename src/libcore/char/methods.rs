@@ -1,20 +1,11 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! impl char {}
 
-use slice;
-use str::from_utf8_unchecked_mut;
+use crate::slice;
+use crate::str::from_utf8_unchecked_mut;
+use crate::unicode::printable::is_printable;
+use crate::unicode::tables::{conversions, derived_property, general_category, property};
+
 use super::*;
-use unicode::printable::is_printable;
-use unicode::tables::{conversions, derived_property, general_category, property};
 
 #[lang = "char"]
 impl char {
@@ -121,17 +112,25 @@ impl char {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn to_digit(self, radix: u32) -> Option<u32> {
-        if radix > 36 {
-            panic!("to_digit: radix is too high (maximum 36)");
-        }
-        let val = match self {
-          '0' ..= '9' => self as u32 - '0' as u32,
-          'a' ..= 'z' => self as u32 - 'a' as u32 + 10,
-          'A' ..= 'Z' => self as u32 - 'A' as u32 + 10,
-          _ => return None,
+        assert!(radix <= 36, "to_digit: radix is too high (maximum 36)");
+
+        // the code is split up here to improve execution speed for cases where
+        // the `radix` is constant and 10 or smaller
+        let val = if radix <= 10 {
+            match self {
+                '0'..='9' => self as u32 - '0' as u32,
+                _ => return None,
+            }
+        } else {
+            match self {
+                '0'..='9' => self as u32 - '0' as u32,
+                'a'..='z' => self as u32 - 'a' as u32 + 10,
+                'A'..='Z' => self as u32 - 'A' as u32 + 10,
+                _ => return None,
+            }
         };
-        if val < radix { Some(val) }
-        else { None }
+
+        if val < radix { Some(val) } else { None }
     }
 
     /// Returns an iterator that yields the hexadecimal Unicode escape of a
@@ -190,10 +189,8 @@ impl char {
     /// An extended version of `escape_debug` that optionally permits escaping
     /// Extended Grapheme codepoints. This allows us to format characters like
     /// nonspacing marks better when they're at the start of a string.
-    #[doc(hidden)]
-    #[unstable(feature = "str_internals", issue = "0")]
     #[inline]
-    pub fn escape_debug_ext(self, escape_grapheme_extended: bool) -> EscapeDebug {
+    pub(crate) fn escape_debug_ext(self, escape_grapheme_extended: bool) -> EscapeDebug {
         let init_state = match self {
             '\t' => EscapeDefaultState::Backslash('t'),
             '\r' => EscapeDefaultState::Backslash('r'),
@@ -305,8 +302,8 @@ impl char {
             '\r' => EscapeDefaultState::Backslash('r'),
             '\n' => EscapeDefaultState::Backslash('n'),
             '\\' | '\'' | '"' => EscapeDefaultState::Backslash(self),
-            '\x20' ..= '\x7e' => EscapeDefaultState::Char(self),
-            _ => EscapeDefaultState::Unicode(self.escape_unicode())
+            '\x20'..='\x7e' => EscapeDefaultState::Char(self),
+            _ => EscapeDefaultState::Unicode(self.escape_unicode()),
         };
         EscapeDefault { state: init_state }
     }
@@ -339,16 +336,16 @@ impl char {
     /// ```
     /// // as chars
     /// let eastern = '東';
-    /// let capitol = '京';
+    /// let capital = '京';
     ///
     /// // both can be represented as three bytes
     /// assert_eq!(3, eastern.len_utf8());
-    /// assert_eq!(3, capitol.len_utf8());
+    /// assert_eq!(3, capital.len_utf8());
     ///
     /// // as a &str, these two are encoded in UTF-8
     /// let tokyo = "東京";
     ///
-    /// let len = eastern.len_utf8() + capitol.len_utf8();
+    /// let len = eastern.len_utf8() + capital.len_utf8();
     ///
     /// // we can see that they take six bytes total...
     /// assert_eq!(6, tokyo.len());
@@ -437,34 +434,35 @@ impl char {
     #[inline]
     pub fn encode_utf8(self, dst: &mut [u8]) -> &mut str {
         let code = self as u32;
-        unsafe {
-            let len =
-            if code < MAX_ONE_B && !dst.is_empty() {
-                *dst.get_unchecked_mut(0) = code as u8;
-                1
-            } else if code < MAX_TWO_B && dst.len() >= 2 {
-                *dst.get_unchecked_mut(0) = (code >> 6 & 0x1F) as u8 | TAG_TWO_B;
-                *dst.get_unchecked_mut(1) = (code & 0x3F) as u8 | TAG_CONT;
-                2
-            } else if code < MAX_THREE_B && dst.len() >= 3  {
-                *dst.get_unchecked_mut(0) = (code >> 12 & 0x0F) as u8 | TAG_THREE_B;
-                *dst.get_unchecked_mut(1) = (code >>  6 & 0x3F) as u8 | TAG_CONT;
-                *dst.get_unchecked_mut(2) = (code & 0x3F) as u8 | TAG_CONT;
-                3
-            } else if dst.len() >= 4 {
-                *dst.get_unchecked_mut(0) = (code >> 18 & 0x07) as u8 | TAG_FOUR_B;
-                *dst.get_unchecked_mut(1) = (code >> 12 & 0x3F) as u8 | TAG_CONT;
-                *dst.get_unchecked_mut(2) = (code >>  6 & 0x3F) as u8 | TAG_CONT;
-                *dst.get_unchecked_mut(3) = (code & 0x3F) as u8 | TAG_CONT;
-                4
-            } else {
-                panic!("encode_utf8: need {} bytes to encode U+{:X}, but the buffer has {}",
-                    from_u32_unchecked(code).len_utf8(),
-                    code,
-                    dst.len())
-            };
-            from_utf8_unchecked_mut(dst.get_unchecked_mut(..len))
-        }
+        let len = self.len_utf8();
+        match (len, &mut dst[..]) {
+            (1, [a, ..]) => {
+                *a = code as u8;
+            }
+            (2, [a, b, ..]) => {
+                *a = (code >> 6 & 0x1F) as u8 | TAG_TWO_B;
+                *b = (code & 0x3F) as u8 | TAG_CONT;
+            }
+            (3, [a, b, c, ..]) => {
+                *a = (code >> 12 & 0x0F) as u8 | TAG_THREE_B;
+                *b = (code >> 6 & 0x3F) as u8 | TAG_CONT;
+                *c = (code & 0x3F) as u8 | TAG_CONT;
+            }
+            (4, [a, b, c, d, ..]) => {
+                *a = (code >> 18 & 0x07) as u8 | TAG_FOUR_B;
+                *b = (code >> 12 & 0x3F) as u8 | TAG_CONT;
+                *c = (code >> 6 & 0x3F) as u8 | TAG_CONT;
+                *d = (code & 0x3F) as u8 | TAG_CONT;
+            }
+            _ => panic!(
+                "encode_utf8: need {} bytes to encode U+{:X}, but the buffer has {}",
+                len,
+                code,
+                dst.len(),
+            ),
+        };
+        // SAFETY: We just wrote UTF-8 content in, so converting to str is fine.
+        unsafe { from_utf8_unchecked_mut(&mut dst[..len]) }
     }
 
     /// Encodes this character as UTF-16 into the provided `u16` buffer,
@@ -505,6 +503,7 @@ impl char {
     #[inline]
     pub fn encode_utf16(self, dst: &mut [u16]) -> &mut [u16] {
         let mut code = self as u32;
+        // SAFETY: each arm checks whether there are enough bits to write into
         unsafe {
             if (code & 0xFFFF) == code && !dst.is_empty() {
                 // The BMP falls through (assuming non-surrogate, as it should)
@@ -517,15 +516,24 @@ impl char {
                 *dst.get_unchecked_mut(1) = 0xDC00 | ((code as u16) & 0x3FF);
                 slice::from_raw_parts_mut(dst.as_mut_ptr(), 2)
             } else {
-                panic!("encode_utf16: need {} units to encode U+{:X}, but the buffer has {}",
+                panic!(
+                    "encode_utf16: need {} units to encode U+{:X}, but the buffer has {}",
                     from_u32_unchecked(code).len_utf16(),
                     code,
-                    dst.len())
+                    dst.len(),
+                )
             }
         }
     }
 
-    /// Returns true if this `char` is an alphabetic code point, and false if not.
+    /// Returns `true` if this `char` has the `Alphabetic` property.
+    ///
+    /// `Alphabetic` is described in Chapter 4 (Character Properties) of the [Unicode Standard] and
+    /// specified in the [Unicode Character Database][ucd] [`DerivedCoreProperties.txt`].
+    ///
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`DerivedCoreProperties.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/DerivedCoreProperties.txt
     ///
     /// # Examples
     ///
@@ -544,43 +552,18 @@ impl char {
     pub fn is_alphabetic(self) -> bool {
         match self {
             'a'..='z' | 'A'..='Z' => true,
-            c if c > '\x7f' => derived_property::Alphabetic(c),
-            _ => false,
+            c => c > '\x7f' && derived_property::Alphabetic(c),
         }
     }
 
-    /// Returns true if this `char` satisfies the 'XID_Start' Unicode property, and false
-    /// otherwise.
+    /// Returns `true` if this `char` has the `Lowercase` property.
     ///
-    /// 'XID_Start' is a Unicode Derived Property specified in
-    /// [UAX #31](http://unicode.org/reports/tr31/#NFKC_Modifications),
-    /// mostly similar to `ID_Start` but modified for closure under `NFKx`.
-    #[unstable(feature = "rustc_private",
-               reason = "mainly needed for compiler internals",
-               issue = "27812")]
-    #[inline]
-    pub fn is_xid_start(self) -> bool {
-        derived_property::XID_Start(self)
-    }
-
-    /// Returns true if this `char` satisfies the 'XID_Continue' Unicode property, and false
-    /// otherwise.
+    /// `Lowercase` is described in Chapter 4 (Character Properties) of the [Unicode Standard] and
+    /// specified in the [Unicode Character Database][ucd] [`DerivedCoreProperties.txt`].
     ///
-    /// 'XID_Continue' is a Unicode Derived Property specified in
-    /// [UAX #31](http://unicode.org/reports/tr31/#NFKC_Modifications),
-    /// mostly similar to 'ID_Continue' but modified for closure under NFKx.
-    #[unstable(feature = "rustc_private",
-               reason = "mainly needed for compiler internals",
-               issue = "27812")]
-    #[inline]
-    pub fn is_xid_continue(self) -> bool {
-        derived_property::XID_Continue(self)
-    }
-
-    /// Returns true if this `char` is lowercase, and false otherwise.
-    ///
-    /// 'Lowercase' is defined according to the terms of the Unicode Derived Core
-    /// Property `Lowercase`.
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`DerivedCoreProperties.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/DerivedCoreProperties.txt
     ///
     /// # Examples
     ///
@@ -600,15 +583,18 @@ impl char {
     pub fn is_lowercase(self) -> bool {
         match self {
             'a'..='z' => true,
-            c if c > '\x7f' => derived_property::Lowercase(c),
-            _ => false,
+            c => c > '\x7f' && derived_property::Lowercase(c),
         }
     }
 
-    /// Returns true if this `char` is uppercase, and false otherwise.
+    /// Returns `true` if this `char` has the `Uppercase` property.
     ///
-    /// 'Uppercase' is defined according to the terms of the Unicode Derived Core
-    /// Property `Uppercase`.
+    /// `Uppercase` is described in Chapter 4 (Character Properties) of the [Unicode Standard] and
+    /// specified in the [Unicode Character Database][ucd] [`DerivedCoreProperties.txt`].
+    ///
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`DerivedCoreProperties.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/DerivedCoreProperties.txt
     ///
     /// # Examples
     ///
@@ -628,15 +614,16 @@ impl char {
     pub fn is_uppercase(self) -> bool {
         match self {
             'A'..='Z' => true,
-            c if c > '\x7f' => derived_property::Uppercase(c),
-            _ => false,
+            c => c > '\x7f' && derived_property::Uppercase(c),
         }
     }
 
-    /// Returns true if this `char` is whitespace, and false otherwise.
+    /// Returns `true` if this `char` has the `White_Space` property.
     ///
-    /// 'Whitespace' is defined according to the terms of the Unicode Derived Core
-    /// Property `White_Space`.
+    /// `White_Space` is specified in the [Unicode Character Database][ucd] [`PropList.txt`].
+    ///
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`PropList.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/PropList.txt
     ///
     /// # Examples
     ///
@@ -655,15 +642,14 @@ impl char {
     pub fn is_whitespace(self) -> bool {
         match self {
             ' ' | '\x09'..='\x0d' => true,
-            c if c > '\x7f' => property::White_Space(c),
-            _ => false,
+            c => c > '\x7f' && property::White_Space(c),
         }
     }
 
-    /// Returns true if this `char` is alphanumeric, and false otherwise.
+    /// Returns `true` if this `char` satisfies either [`is_alphabetic()`] or [`is_numeric()`].
     ///
-    /// 'Alphanumeric'-ness is defined in terms of the Unicode General Categories
-    /// 'Nd', 'Nl', 'No' and the Derived Core Property 'Alphabetic'.
+    /// [`is_alphabetic()`]: #method.is_alphabetic
+    /// [`is_numeric()`]: #method.is_numeric
     ///
     /// # Examples
     ///
@@ -685,10 +671,15 @@ impl char {
         self.is_alphabetic() || self.is_numeric()
     }
 
-    /// Returns true if this `char` is a control code point, and false otherwise.
+    /// Returns `true` if this `char` has the general category for control codes.
     ///
-    /// 'Control code point' is defined in terms of the Unicode General
-    /// Category `Cc`.
+    /// Control codes (code points with the general category of `Cc`) are described in Chapter 4
+    /// (Character Properties) of the [Unicode Standard] and specified in the [Unicode Character
+    /// Database][ucd] [`UnicodeData.txt`].
+    ///
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`UnicodeData.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/UnicodeData.txt
     ///
     /// # Examples
     ///
@@ -705,19 +696,29 @@ impl char {
         general_category::Cc(self)
     }
 
-    /// Returns true if this `char` is an extended grapheme character, and false otherwise.
+    /// Returns `true` if this `char` has the `Grapheme_Extend` property.
     ///
-    /// 'Extended grapheme character' is defined in terms of the Unicode Shaping and Rendering
-    /// Category `Grapheme_Extend`.
+    /// `Grapheme_Extend` is described in [Unicode Standard Annex #29 (Unicode Text
+    /// Segmentation)][uax29] and specified in the [Unicode Character Database][ucd]
+    /// [`DerivedCoreProperties.txt`].
+    ///
+    /// [uax29]: https://www.unicode.org/reports/tr29/
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`DerivedCoreProperties.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/DerivedCoreProperties.txt
     #[inline]
     pub(crate) fn is_grapheme_extended(self) -> bool {
         derived_property::Grapheme_Extend(self)
     }
 
-    /// Returns true if this `char` is numeric, and false otherwise.
+    /// Returns `true` if this `char` has one of the general categories for numbers.
     ///
-    /// 'Numeric'-ness is defined in terms of the Unicode General Categories
-    /// 'Nd', 'Nl', 'No'.
+    /// The general categories for numbers (`Nd` for decimal digits, `Nl` for letter-like numeric
+    /// characters, and `No` for other numeric characters) are specified in the [Unicode Character
+    /// Database][ucd] [`UnicodeData.txt`].
+    ///
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`UnicodeData.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/UnicodeData.txt
     ///
     /// # Examples
     ///
@@ -738,30 +739,33 @@ impl char {
     pub fn is_numeric(self) -> bool {
         match self {
             '0'..='9' => true,
-            c if c > '\x7f' => general_category::N(c),
-            _ => false,
+            c => c > '\x7f' && general_category::N(c),
         }
     }
 
-    /// Returns an iterator that yields the lowercase equivalent of a `char`
-    /// as one or more `char`s.
+    /// Returns an iterator that yields the lowercase mapping of this `char` as one or more
+    /// `char`s.
     ///
-    /// If a character does not have a lowercase equivalent, the same character
-    /// will be returned back by the iterator.
+    /// If this `char` does not have a lowercase mapping, the iterator yields the same `char`.
     ///
-    /// This performs complex unconditional mappings with no tailoring: it maps
-    /// one Unicode character to its lowercase equivalent according to the
-    /// [Unicode database] and the additional complex mappings
-    /// [`SpecialCasing.txt`]. Conditional mappings (based on context or
-    /// language) are not considered here.
+    /// If this `char` has a one-to-one lowercase mapping given by the [Unicode Character
+    /// Database][ucd] [`UnicodeData.txt`], the iterator yields that `char`.
     ///
-    /// For a full reference, see [here][reference].
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`UnicodeData.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/UnicodeData.txt
     ///
-    /// [Unicode database]: ftp://ftp.unicode.org/Public/UNIDATA/UnicodeData.txt
+    /// If this `char` requires special considerations (e.g. multiple `char`s) the iterator yields
+    /// the `char`(s) given by [`SpecialCasing.txt`].
     ///
-    /// [`SpecialCasing.txt`]: ftp://ftp.unicode.org/Public/UNIDATA/SpecialCasing.txt
+    /// [`SpecialCasing.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/SpecialCasing.txt
     ///
-    /// [reference]: http://www.unicode.org/versions/Unicode7.0.0/ch03.pdf#G33992
+    /// This operation performs an unconditional mapping without tailoring. That is, the conversion
+    /// is independent of context and language.
+    ///
+    /// In the [Unicode Standard], Chapter 4 (Character Properties) discusses case mapping in
+    /// general and Chapter 3 (Conformance) discusses the default algorithm for case conversion.
+    ///
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
     ///
     /// # Examples
     ///
@@ -804,25 +808,29 @@ impl char {
         ToLowercase(CaseMappingIter::new(conversions::to_lower(self)))
     }
 
-    /// Returns an iterator that yields the uppercase equivalent of a `char`
-    /// as one or more `char`s.
+    /// Returns an iterator that yields the uppercase mapping of this `char` as one or more
+    /// `char`s.
     ///
-    /// If a character does not have an uppercase equivalent, the same character
-    /// will be returned back by the iterator.
+    /// If this `char` does not have a uppercase mapping, the iterator yields the same `char`.
     ///
-    /// This performs complex unconditional mappings with no tailoring: it maps
-    /// one Unicode character to its uppercase equivalent according to the
-    /// [Unicode database] and the additional complex mappings
-    /// [`SpecialCasing.txt`]. Conditional mappings (based on context or
-    /// language) are not considered here.
+    /// If this `char` has a one-to-one uppercase mapping given by the [Unicode Character
+    /// Database][ucd] [`UnicodeData.txt`], the iterator yields that `char`.
     ///
-    /// For a full reference, see [here][reference].
+    /// [ucd]: https://www.unicode.org/reports/tr44/
+    /// [`UnicodeData.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/UnicodeData.txt
     ///
-    /// [Unicode database]: ftp://ftp.unicode.org/Public/UNIDATA/UnicodeData.txt
+    /// If this `char` requires special considerations (e.g. multiple `char`s) the iterator yields
+    /// the `char`(s) given by [`SpecialCasing.txt`].
     ///
-    /// [`SpecialCasing.txt`]: ftp://ftp.unicode.org/Public/UNIDATA/SpecialCasing.txt
+    /// [`SpecialCasing.txt`]: https://www.unicode.org/Public/UCD/latest/ucd/SpecialCasing.txt
     ///
-    /// [reference]: http://www.unicode.org/versions/Unicode7.0.0/ch03.pdf#G33992
+    /// This operation performs an unconditional mapping without tailoring. That is, the conversion
+    /// is independent of context and language.
+    ///
+    /// In the [Unicode Standard], Chapter 4 (Character Properties) discusses case mapping in
+    /// general and Chapter 3 (Conformance) discusses the default algorithm for case conversion.
+    ///
+    /// [Unicode Standard]: https://www.unicode.org/versions/latest/
     ///
     /// # Examples
     ///
@@ -902,8 +910,9 @@ impl char {
     /// assert!(!non_ascii.is_ascii());
     /// ```
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
+    #[rustc_const_stable(feature = "const_ascii_methods_on_intrinsics", since = "1.32.0")]
     #[inline]
-    pub fn is_ascii(&self) -> bool {
+    pub const fn is_ascii(&self) -> bool {
         *self as u32 <= 0x7F
     }
 
@@ -932,11 +941,7 @@ impl char {
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[inline]
     pub fn to_ascii_uppercase(&self) -> char {
-        if self.is_ascii() {
-            (*self as u8).to_ascii_uppercase() as char
-        } else {
-            *self
-        }
+        if self.is_ascii() { (*self as u8).to_ascii_uppercase() as char } else { *self }
     }
 
     /// Makes a copy of the value in its ASCII lower case equivalent.
@@ -964,11 +969,7 @@ impl char {
     #[stable(feature = "ascii_methods_on_intrinsics", since = "1.23.0")]
     #[inline]
     pub fn to_ascii_lowercase(&self) -> char {
-        if self.is_ascii() {
-            (*self as u8).to_ascii_lowercase() as char
-        } else {
-            *self
-        }
+        if self.is_ascii() { (*self as u8).to_ascii_lowercase() as char } else { *self }
     }
 
     /// Checks that two values are an ASCII case-insensitive match.
@@ -1044,8 +1045,8 @@ impl char {
 
     /// Checks if the value is an ASCII alphabetic character:
     ///
-    /// - U+0041 'A' ... U+005A 'Z', or
-    /// - U+0061 'a' ... U+007A 'z'.
+    /// - U+0041 'A' ..= U+005A 'Z', or
+    /// - U+0061 'a' ..= U+007A 'z'.
     ///
     /// # Examples
     ///
@@ -1077,7 +1078,7 @@ impl char {
     }
 
     /// Checks if the value is an ASCII uppercase character:
-    /// U+0041 'A' ... U+005A 'Z'.
+    /// U+0041 'A' ..= U+005A 'Z'.
     ///
     /// # Examples
     ///
@@ -1109,7 +1110,7 @@ impl char {
     }
 
     /// Checks if the value is an ASCII lowercase character:
-    /// U+0061 'a' ... U+007A 'z'.
+    /// U+0061 'a' ..= U+007A 'z'.
     ///
     /// # Examples
     ///
@@ -1142,9 +1143,9 @@ impl char {
 
     /// Checks if the value is an ASCII alphanumeric character:
     ///
-    /// - U+0041 'A' ... U+005A 'Z', or
-    /// - U+0061 'a' ... U+007A 'z', or
-    /// - U+0030 '0' ... U+0039 '9'.
+    /// - U+0041 'A' ..= U+005A 'Z', or
+    /// - U+0061 'a' ..= U+007A 'z', or
+    /// - U+0030 '0' ..= U+0039 '9'.
     ///
     /// # Examples
     ///
@@ -1176,7 +1177,7 @@ impl char {
     }
 
     /// Checks if the value is an ASCII decimal digit:
-    /// U+0030 '0' ... U+0039 '9'.
+    /// U+0030 '0' ..= U+0039 '9'.
     ///
     /// # Examples
     ///
@@ -1209,9 +1210,9 @@ impl char {
 
     /// Checks if the value is an ASCII hexadecimal digit:
     ///
-    /// - U+0030 '0' ... U+0039 '9', or
-    /// - U+0041 'A' ... U+0046 'F', or
-    /// - U+0061 'a' ... U+0066 'f'.
+    /// - U+0030 '0' ..= U+0039 '9', or
+    /// - U+0041 'A' ..= U+0046 'F', or
+    /// - U+0061 'a' ..= U+0066 'f'.
     ///
     /// # Examples
     ///
@@ -1244,10 +1245,10 @@ impl char {
 
     /// Checks if the value is an ASCII punctuation character:
     ///
-    /// - U+0021 ... U+002F `! " # $ % & ' ( ) * + , - . /`, or
-    /// - U+003A ... U+0040 `: ; < = > ? @`, or
-    /// - U+005B ... U+0060 ``[ \ ] ^ _ ` ``, or
-    /// - U+007B ... U+007E `{ | } ~`
+    /// - U+0021 ..= U+002F `! " # $ % & ' ( ) * + , - . /`, or
+    /// - U+003A ..= U+0040 `: ; < = > ? @`, or
+    /// - U+005B ..= U+0060 ``[ \ ] ^ _ ` ``, or
+    /// - U+007B ..= U+007E `{ | } ~`
     ///
     /// # Examples
     ///
@@ -1279,7 +1280,7 @@ impl char {
     }
 
     /// Checks if the value is an ASCII graphic character:
-    /// U+0021 '!' ... U+007E '~'.
+    /// U+0021 '!' ..= U+007E '~'.
     ///
     /// # Examples
     ///
@@ -1360,7 +1361,7 @@ impl char {
     }
 
     /// Checks if the value is an ASCII control character:
-    /// U+0000 NUL ... U+001F UNIT SEPARATOR, or U+007F DELETE.
+    /// U+0000 NUL ..= U+001F UNIT SEPARATOR, or U+007F DELETE.
     /// Note that most ASCII whitespace characters are control
     /// characters, but SPACE is not.
     ///

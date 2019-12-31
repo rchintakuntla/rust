@@ -1,60 +1,50 @@
-// Copyright 2014-2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // FIXME:
 // Alignment of 128 bit types is not currently handled, this will
 // need to be fixed when PowerPC vector support is added.
 
-use abi::call::{FnType, ArgType, Reg, RegKind, Uniform};
-use abi::{Align, Endian, HasDataLayout, LayoutOf, TyLayout, TyLayoutMethods};
+use crate::abi::call::{ArgAbi, FnAbi, Reg, RegKind, Uniform};
+use crate::abi::{Endian, HasDataLayout, LayoutOf, TyLayout, TyLayoutMethods};
+use crate::spec::HasTargetSpec;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum ABI {
     ELFv1, // original ABI used for powerpc64 (big-endian)
-    ELFv2, // newer ABI used for powerpc64le
+    ELFv2, // newer ABI used for powerpc64le and musl (both endians)
 }
-use self::ABI::*;
+use ABI::*;
 
-fn is_homogeneous_aggregate<'a, Ty, C>(cx: C, arg: &mut ArgType<'a, Ty>, abi: ABI)
-                                       -> Option<Uniform>
-    where Ty: TyLayoutMethods<'a, C> + Copy,
-          C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout
+fn is_homogeneous_aggregate<'a, Ty, C>(
+    cx: &C,
+    arg: &mut ArgAbi<'a, Ty>,
+    abi: ABI,
+) -> Option<Uniform>
+where
+    Ty: TyLayoutMethods<'a, C> + Copy,
+    C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout,
 {
-    arg.layout.homogeneous_aggregate(cx).and_then(|unit| {
+    arg.layout.homogeneous_aggregate(cx).unit().and_then(|unit| {
         // ELFv1 only passes one-member aggregates transparently.
         // ELFv2 passes up to eight uniquely addressable members.
         if (abi == ELFv1 && arg.layout.size > unit.size)
-                || arg.layout.size > unit.size.checked_mul(8, cx).unwrap() {
+            || arg.layout.size > unit.size.checked_mul(8, cx).unwrap()
+        {
             return None;
         }
 
         let valid_unit = match unit.kind {
             RegKind::Integer => false,
             RegKind::Float => true,
-            RegKind::Vector => arg.layout.size.bits() == 128
+            RegKind::Vector => arg.layout.size.bits() == 128,
         };
 
-        if valid_unit {
-            Some(Uniform {
-                unit,
-                total: arg.layout.size
-            })
-        } else {
-            None
-        }
+        valid_unit.then_some(Uniform { unit, total: arg.layout.size })
     })
 }
 
-fn classify_ret_ty<'a, Ty, C>(cx: C, ret: &mut ArgType<'a, Ty>, abi: ABI)
-    where Ty: TyLayoutMethods<'a, C> + Copy,
-          C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout
+fn classify_ret<'a, Ty, C>(cx: &C, ret: &mut ArgAbi<'a, Ty>, abi: ABI)
+where
+    Ty: TyLayoutMethods<'a, C> + Copy,
+    C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout,
 {
     if !ret.layout.is_aggregate() {
         ret.extend_integer_width_to(64);
@@ -75,7 +65,9 @@ fn classify_ret_ty<'a, Ty, C>(cx: C, ret: &mut ArgType<'a, Ty>, abi: ABI)
     let size = ret.layout.size;
     let bits = size.bits();
     if bits <= 128 {
-        let unit = if bits <= 8 {
+        let unit = if cx.data_layout().endian == Endian::Big {
+            Reg { kind: RegKind::Integer, size }
+        } else if bits <= 8 {
             Reg::i8()
         } else if bits <= 16 {
             Reg::i16()
@@ -85,19 +77,17 @@ fn classify_ret_ty<'a, Ty, C>(cx: C, ret: &mut ArgType<'a, Ty>, abi: ABI)
             Reg::i64()
         };
 
-        ret.cast_to(Uniform {
-            unit,
-            total: size
-        });
+        ret.cast_to(Uniform { unit, total: size });
         return;
     }
 
     ret.make_indirect();
 }
 
-fn classify_arg_ty<'a, Ty, C>(cx: C, arg: &mut ArgType<'a, Ty>, abi: ABI)
-    where Ty: TyLayoutMethods<'a, C> + Copy,
-          C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout
+fn classify_arg<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'a, Ty>, abi: ABI)
+where
+    Ty: TyLayoutMethods<'a, C> + Copy,
+    C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout,
 {
     if !arg.layout.is_aggregate() {
         arg.extend_integer_width_to(64);
@@ -110,45 +100,42 @@ fn classify_arg_ty<'a, Ty, C>(cx: C, arg: &mut ArgType<'a, Ty>, abi: ABI)
     }
 
     let size = arg.layout.size;
-    let (unit, total) = match abi {
-        ELFv1 => {
-            // In ELFv1, aggregates smaller than a doubleword should appear in
-            // the least-significant bits of the parameter doubleword.  The rest
-            // should be padded at their tail to fill out multiple doublewords.
-            if size.bits() <= 64 {
-                (Reg { kind: RegKind::Integer, size }, size)
-            } else {
-                let align = Align::from_bits(64, 64).unwrap();
-                (Reg::i64(), size.abi_align(align))
-            }
-        },
-        ELFv2 => {
-            // In ELFv2, we can just cast directly.
-            (Reg::i64(), size)
-        },
+    let (unit, total) = if size.bits() <= 64 {
+        // Aggregates smaller than a doubleword should appear in
+        // the least-significant bits of the parameter doubleword.
+        (Reg { kind: RegKind::Integer, size }, size)
+    } else {
+        // Aggregates larger than a doubleword should be padded
+        // at the tail to fill out a whole number of doublewords.
+        let reg_i64 = Reg::i64();
+        (reg_i64, size.align_to(reg_i64.align(cx)))
     };
 
-    arg.cast_to(Uniform {
-        unit,
-        total
-    });
+    arg.cast_to(Uniform { unit, total });
 }
 
-pub fn compute_abi_info<'a, Ty, C>(cx: C, fty: &mut FnType<'a, Ty>)
-    where Ty: TyLayoutMethods<'a, C> + Copy,
-          C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout
+pub fn compute_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'a, Ty>)
+where
+    Ty: TyLayoutMethods<'a, C> + Copy,
+    C: LayoutOf<Ty = Ty, TyLayout = TyLayout<'a, Ty>> + HasDataLayout + HasTargetSpec,
 {
-    let abi = match cx.data_layout().endian {
-        Endian::Big => ELFv1,
-        Endian::Little => ELFv2,
+    let abi = if cx.target_spec().target_env == "musl" {
+        ELFv2
+    } else {
+        match cx.data_layout().endian {
+            Endian::Big => ELFv1,
+            Endian::Little => ELFv2,
+        }
     };
 
-    if !fty.ret.is_ignore() {
-        classify_ret_ty(cx, &mut fty.ret, abi);
+    if !fn_abi.ret.is_ignore() {
+        classify_ret(cx, &mut fn_abi.ret, abi);
     }
 
-    for arg in &mut fty.args {
-        if arg.is_ignore() { continue; }
-        classify_arg_ty(cx, arg, abi);
+    for arg in &mut fn_abi.args {
+        if arg.is_ignore() {
+            continue;
+        }
+        classify_arg(cx, arg, abi);
     }
 }

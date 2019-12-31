@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! A dynamically-sized view into a contiguous sequence, `[T]`.
 //!
 //! *[See also the slice primitive type](../../std/primitive.slice.html).*
@@ -92,77 +82,78 @@
 //! [`.chunks`]: ../../std/primitive.slice.html#method.chunks
 //! [`.windows`]: ../../std/primitive.slice.html#method.windows
 #![stable(feature = "rust1", since = "1.0.0")]
-
 // Many of the usings in this module are only used in the test configuration.
 // It's cleaner to just turn off the unused_imports warning than to fix them.
 #![cfg_attr(test, allow(unused_imports, dead_code))]
 
+use core::borrow::{Borrow, BorrowMut};
 use core::cmp::Ordering::{self, Less};
-use core::mem::size_of;
-use core::mem;
+use core::mem::{self, size_of};
 use core::ptr;
-use core::{u8, u16, u32};
+use core::{u16, u32, u8};
 
-use borrow::{Borrow, BorrowMut, ToOwned};
-use boxed::Box;
-use vec::Vec;
+use crate::borrow::ToOwned;
+use crate::boxed::Box;
+use crate::vec::Vec;
 
+#[stable(feature = "slice_get_slice", since = "1.28.0")]
+pub use core::slice::SliceIndex;
+#[stable(feature = "from_ref", since = "1.28.0")]
+pub use core::slice::{from_mut, from_ref};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::slice::{from_raw_parts, from_raw_parts_mut};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::slice::{Chunks, Windows};
+#[stable(feature = "chunks_exact", since = "1.31.0")]
+pub use core::slice::{ChunksExact, ChunksExactMut};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::slice::{ChunksMut, Split, SplitMut};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use core::slice::{Iter, IterMut};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use core::slice::{SplitMut, ChunksMut, Split};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use core::slice::{SplitN, RSplitN, SplitNMut, RSplitNMut};
+#[stable(feature = "rchunks", since = "1.31.0")]
+pub use core::slice::{RChunks, RChunksExact, RChunksExactMut, RChunksMut};
 #[stable(feature = "slice_rsplit", since = "1.27.0")]
 pub use core::slice::{RSplit, RSplitMut};
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use core::slice::{from_raw_parts, from_raw_parts_mut};
-#[stable(feature = "from_ref", since = "1.28.0")]
-pub use core::slice::{from_ref, from_mut};
-#[stable(feature = "slice_get_slice", since = "1.28.0")]
-pub use core::slice::SliceIndex;
-#[unstable(feature = "exact_chunks", issue = "47115")]
-pub use core::slice::{ExactChunks, ExactChunksMut};
+pub use core::slice::{RSplitN, RSplitNMut, SplitN, SplitNMut};
 
 ////////////////////////////////////////////////////////////////////////////////
 // Basic slice extension methods
 ////////////////////////////////////////////////////////////////////////////////
 
 // HACK(japaric) needed for the implementation of `vec!` macro during testing
-// NB see the hack module in this file for more details
+// N.B., see the `hack` module in this file for more details.
 #[cfg(test)]
-pub use self::hack::into_vec;
+pub use hack::into_vec;
 
 // HACK(japaric) needed for the implementation of `Vec::clone` during testing
-// NB see the hack module in this file for more details
+// N.B., see the `hack` module in this file for more details.
 #[cfg(test)]
-pub use self::hack::to_vec;
+pub use hack::to_vec;
 
 // HACK(japaric): With cfg(test) `impl [T]` is not available, these three
 // functions are actually methods that are in `impl [T]` but not in
 // `core::slice::SliceExt` - we need to supply these functions for the
 // `test_permutations` test
 mod hack {
-    use boxed::Box;
-    use core::mem;
-
+    use crate::boxed::Box;
     #[cfg(test)]
-    use string::ToString;
-    use vec::Vec;
+    use crate::string::ToString;
+    use crate::vec::Vec;
 
-    pub fn into_vec<T>(mut b: Box<[T]>) -> Vec<T> {
+    pub fn into_vec<T>(b: Box<[T]>) -> Vec<T> {
         unsafe {
-            let xs = Vec::from_raw_parts(b.as_mut_ptr(), b.len(), b.len());
-            mem::forget(b);
+            let len = b.len();
+            let b = Box::into_raw(b);
+            let xs = Vec::from_raw_parts(b as *mut T, len, len);
             xs
         }
     }
 
     #[inline]
     pub fn to_vec<T>(s: &[T]) -> Vec<T>
-        where T: Clone
+    where
+        T: Clone,
     {
         let mut vector = Vec::with_capacity(s.len());
         vector.extend_from_slice(s);
@@ -175,7 +166,7 @@ mod hack {
 impl<T> [T] {
     /// Sorts the slice.
     ///
-    /// This sort is stable (i.e. does not reorder equal elements) and `O(n log n)` worst-case.
+    /// This sort is stable (i.e., does not reorder equal elements) and `O(n log n)` worst-case.
     ///
     /// When applicable, unstable sorting is preferred because it is generally faster than stable
     /// sorting and it doesn't allocate auxiliary memory.
@@ -202,14 +193,31 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn sort(&mut self)
-        where T: Ord
+    where
+        T: Ord,
     {
         merge_sort(self, |a, b| a.lt(b));
     }
 
     /// Sorts the slice with a comparator function.
     ///
-    /// This sort is stable (i.e. does not reorder equal elements) and `O(n log n)` worst-case.
+    /// This sort is stable (i.e., does not reorder equal elements) and `O(n log n)` worst-case.
+    ///
+    /// The comparator function must define a total ordering for the elements in the slice. If
+    /// the ordering is not total, the order of the elements is unspecified. An order is a
+    /// total order if it is (for all `a`, `b` and `c`):
+    ///
+    /// * total and antisymmetric: exactly one of `a < b`, `a == b` or `a > b` is true, and
+    /// * transitive, `a < b` and `b < c` implies `a < c`. The same must hold for both `==` and `>`.
+    ///
+    /// For example, while [`f64`] doesn't implement [`Ord`] because `NaN != NaN`, we can use
+    /// `partial_cmp` as our sort function when we know the slice doesn't contain a `NaN`.
+    ///
+    /// ```
+    /// let mut floats = [5f64, 4.0, 1.0, 3.0, 2.0];
+    /// floats.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    /// assert_eq!(floats, [1.0, 2.0, 3.0, 4.0, 5.0]);
+    /// ```
     ///
     /// When applicable, unstable sorting is preferred because it is generally faster than stable
     /// sorting and it doesn't allocate auxiliary memory.
@@ -239,15 +247,20 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn sort_by<F>(&mut self, mut compare: F)
-        where F: FnMut(&T, &T) -> Ordering
+    where
+        F: FnMut(&T, &T) -> Ordering,
     {
         merge_sort(self, |a, b| compare(a, b) == Less);
     }
 
     /// Sorts the slice with a key extraction function.
     ///
-    /// This sort is stable (i.e. does not reorder equal elements) and `O(m n log(m n))`
+    /// This sort is stable (i.e., does not reorder equal elements) and `O(m n log(m n))`
     /// worst-case, where the key function is `O(m)`.
+    ///
+    /// For expensive key functions (e.g. functions that are not simple property accesses or
+    /// basic operations), [`sort_by_cached_key`](#method.sort_by_cached_key) is likely to be
+    /// significantly faster, as it does not recompute element keys.
     ///
     /// When applicable, unstable sorting is preferred because it is generally faster than stable
     /// sorting and it doesn't allocate auxiliary memory.
@@ -274,7 +287,9 @@ impl<T> [T] {
     #[stable(feature = "slice_sort_by_key", since = "1.7.0")]
     #[inline]
     pub fn sort_by_key<K, F>(&mut self, mut f: F)
-        where F: FnMut(&T) -> K, K: Ord
+    where
+        F: FnMut(&T) -> K,
+        K: Ord,
     {
         merge_sort(self, |a, b| f(a).lt(&f(b)));
     }
@@ -283,10 +298,10 @@ impl<T> [T] {
     ///
     /// During sorting, the key function is called only once per element.
     ///
-    /// This sort is stable (i.e. does not reorder equal elements) and `O(m n + n log n)`
+    /// This sort is stable (i.e., does not reorder equal elements) and `O(m n + n log n)`
     /// worst-case, where the key function is `O(m)`.
     ///
-    /// For simple key functions (e.g. functions that are property accesses or
+    /// For simple key functions (e.g., functions that are property accesses or
     /// basic operations), [`sort_by_key`](#method.sort_by_key) is likely to be
     /// faster.
     ///
@@ -304,7 +319,6 @@ impl<T> [T] {
     /// # Examples
     ///
     /// ```
-    /// #![feature(slice_sort_by_cached_key)]
     /// let mut v = [-5i32, 4, 32, -3, 2];
     ///
     /// v.sort_by_cached_key(|k| k.to_string());
@@ -312,14 +326,16 @@ impl<T> [T] {
     /// ```
     ///
     /// [pdqsort]: https://github.com/orlp/pdqsort
-    #[unstable(feature = "slice_sort_by_cached_key", issue = "34447")]
+    #[stable(feature = "slice_sort_by_cached_key", since = "1.34.0")]
     #[inline]
     pub fn sort_by_cached_key<K, F>(&mut self, f: F)
-        where F: FnMut(&T) -> K, K: Ord
+    where
+        F: FnMut(&T) -> K,
+        K: Ord,
     {
         // Helper macro for indexing our vector by the smallest possible type, to reduce allocation.
         macro_rules! sort_by_key {
-            ($t:ty, $slice:ident, $f:ident) => ({
+            ($t:ty, $slice:ident, $f:ident) => {{
                 let mut indices: Vec<_> =
                     $slice.iter().map($f).enumerate().map(|(i, k)| (k, i as $t)).collect();
                 // The elements of `indices` are unique, as they are indexed, so any sort will be
@@ -334,19 +350,27 @@ impl<T> [T] {
                     indices[i].1 = index;
                     $slice.swap(i, index as usize);
                 }
-            })
+            }};
         }
 
-        let sz_u8    = mem::size_of::<(K, u8)>();
-        let sz_u16   = mem::size_of::<(K, u16)>();
-        let sz_u32   = mem::size_of::<(K, u32)>();
+        let sz_u8 = mem::size_of::<(K, u8)>();
+        let sz_u16 = mem::size_of::<(K, u16)>();
+        let sz_u32 = mem::size_of::<(K, u32)>();
         let sz_usize = mem::size_of::<(K, usize)>();
 
         let len = self.len();
-        if len < 2 { return }
-        if sz_u8  < sz_u16   && len <= ( u8::MAX as usize) { return sort_by_key!( u8, self, f) }
-        if sz_u16 < sz_u32   && len <= (u16::MAX as usize) { return sort_by_key!(u16, self, f) }
-        if sz_u32 < sz_usize && len <= (u32::MAX as usize) { return sort_by_key!(u32, self, f) }
+        if len < 2 {
+            return;
+        }
+        if sz_u8 < sz_u16 && len <= (u8::MAX as usize) {
+            return sort_by_key!(u8, self, f);
+        }
+        if sz_u16 < sz_u32 && len <= (u16::MAX as usize) {
+            return sort_by_key!(u16, self, f);
+        }
+        if sz_u32 < sz_usize && len <= (u32::MAX as usize) {
+            return sort_by_key!(u32, self, f);
+        }
         sort_by_key!(usize, self, f)
     }
 
@@ -363,9 +387,10 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn to_vec(&self) -> Vec<T>
-        where T: Clone
+    where
+        T: Clone,
     {
-        // NB see hack module in this file
+        // N.B., see the `hack` module in this file for more details.
         hack::to_vec(self)
     }
 
@@ -386,27 +411,35 @@ impl<T> [T] {
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn into_vec(self: Box<Self>) -> Vec<T> {
-        // NB see hack module in this file
+        // N.B., see the `hack` module in this file for more details.
         hack::into_vec(self)
     }
 
     /// Creates a vector by repeating a slice `n` times.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if the capacity would overflow.
     ///
     /// # Examples
     ///
     /// Basic usage:
     ///
     /// ```
-    /// #![feature(repeat_generic_slice)]
-    ///
-    /// fn main() {
-    ///     assert_eq!([1, 2].repeat(3), vec![1, 2, 1, 2, 1, 2]);
-    /// }
+    /// assert_eq!([1, 2].repeat(3), vec![1, 2, 1, 2, 1, 2]);
     /// ```
-    #[unstable(feature = "repeat_generic_slice",
-               reason = "it's on str, why not on slice?",
-               issue = "48784")]
-    pub fn repeat(&self, n: usize) -> Vec<T> where T: Copy {
+    ///
+    /// A panic upon overflow:
+    ///
+    /// ```should_panic
+    /// // this will panic at runtime
+    /// b"0123456789abcdef".repeat(usize::max_value());
+    /// ```
+    #[stable(feature = "repeat_generic_slice", since = "1.40.0")]
+    pub fn repeat(&self, n: usize) -> Vec<T>
+    where
+        T: Copy,
+    {
         if n == 0 {
             return Vec::new();
         }
@@ -417,7 +450,8 @@ impl<T> [T] {
         // and `rem` is the remaining part of `n`.
 
         // Using `Vec` to access `set_len()`.
-        let mut buf = Vec::with_capacity(self.len() * n);
+        let capacity = self.len().checked_mul(n).expect("capacity overflow");
+        let mut buf = Vec::with_capacity(capacity);
 
         // `2^expn` repetition is done by doubling `buf` `expn`-times.
         buf.extend(self);
@@ -443,7 +477,7 @@ impl<T> [T] {
 
         // `rem` (`= n - 2^expn`) repetition is done by copying
         // first `rem` repetitions from `buf` itself.
-        let rem_len = self.len() * n - buf.len(); // `self.len() * rem`
+        let rem_len = capacity - buf.len(); // `self.len() * rem`
         if rem_len > 0 {
             // `buf.extend(buf[0 .. rem_len])`:
             unsafe {
@@ -454,11 +488,63 @@ impl<T> [T] {
                     rem_len,
                 );
                 // `buf.len() + rem_len` equals to `buf.capacity()` (`= self.len() * n`).
-                let buf_cap = buf.capacity();
-                buf.set_len(buf_cap);
+                buf.set_len(capacity);
             }
         }
         buf
+    }
+
+    /// Flattens a slice of `T` into a single value `Self::Output`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(["hello", "world"].concat(), "helloworld");
+    /// assert_eq!([[1, 2], [3, 4]].concat(), [1, 2, 3, 4]);
+    /// ```
+    #[stable(feature = "rust1", since = "1.0.0")]
+    pub fn concat<Item: ?Sized>(&self) -> <Self as Concat<Item>>::Output
+    where
+        Self: Concat<Item>,
+    {
+        Concat::concat(self)
+    }
+
+    /// Flattens a slice of `T` into a single value `Self::Output`, placing a
+    /// given separator between each.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// assert_eq!(["hello", "world"].join(" "), "hello world");
+    /// assert_eq!([[1, 2], [3, 4]].join(&0), [1, 2, 0, 3, 4]);
+    /// assert_eq!([[1, 2], [3, 4]].join(&[0, 0][..]), [1, 2, 0, 0, 3, 4]);
+    /// ```
+    #[stable(feature = "rename_connect_to_join", since = "1.3.0")]
+    pub fn join<Separator>(&self, sep: Separator) -> <Self as Join<Separator>>::Output
+    where
+        Self: Join<Separator>,
+    {
+        Join::join(self, sep)
+    }
+
+    /// Flattens a slice of `T` into a single value `Self::Output`, placing a
+    /// given separator between each.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #![allow(deprecated)]
+    /// assert_eq!(["hello", "world"].connect(" "), "hello world");
+    /// assert_eq!([[1, 2], [3, 4]].connect(&0), [1, 2, 0, 3, 4]);
+    /// ```
+    #[stable(feature = "rust1", since = "1.0.0")]
+    #[rustc_deprecated(since = "1.3.0", reason = "renamed to join")]
+    pub fn connect<Separator>(&self, sep: Separator) -> <Self as Join<Separator>>::Output
+    where
+        Self: Join<Separator>,
+    {
+        Join::join(self, sep)
     }
 }
 
@@ -503,76 +589,85 @@ impl [u8] {
 ////////////////////////////////////////////////////////////////////////////////
 // Extension traits for slices over specific kinds of data
 ////////////////////////////////////////////////////////////////////////////////
-#[unstable(feature = "slice_concat_ext",
-           reason = "trait should not have to exist",
-           issue = "27747")]
-/// An extension trait for concatenating slices
+
+/// Helper trait for [`[T]::concat`](../../std/primitive.slice.html#method.concat).
 ///
-/// While this trait is unstable, the methods are stable. `SliceConcatExt` is
-/// included in the [standard library prelude], so you can use [`join()`] and
-/// [`concat()`] as if they existed on `[T]` itself.
+/// Note: the `Item` type parameter is not used in this trait,
+/// but it allows impls to be more generic.
+/// Without it, we get this error:
 ///
-/// [standard library prelude]: ../../std/prelude/index.html
-/// [`join()`]: #tymethod.join
-/// [`concat()`]: #tymethod.concat
-pub trait SliceConcatExt<T: ?Sized> {
-    #[unstable(feature = "slice_concat_ext",
-               reason = "trait should not have to exist",
-               issue = "27747")]
+/// ```error
+/// error[E0207]: the type parameter `T` is not constrained by the impl trait, self type, or predica
+///    --> src/liballoc/slice.rs:608:6
+///     |
+/// 608 | impl<T: Clone, V: Borrow<[T]>> Concat for [V] {
+///     |      ^ unconstrained type parameter
+/// ```
+///
+/// This is because there could exist `V` types with multiple `Borrow<[_]>` impls,
+/// such that multiple `T` types would apply:
+///
+/// ```
+/// # #[allow(dead_code)]
+/// pub struct Foo(Vec<u32>, Vec<String>);
+///
+/// impl std::borrow::Borrow<[u32]> for Foo {
+///     fn borrow(&self) -> &[u32] { &self.0 }
+/// }
+///
+/// impl std::borrow::Borrow<[String]> for Foo {
+///     fn borrow(&self) -> &[String] { &self.1 }
+/// }
+/// ```
+#[unstable(feature = "slice_concat_trait", issue = "27747")]
+pub trait Concat<Item: ?Sized> {
+    #[unstable(feature = "slice_concat_trait", issue = "27747")]
     /// The resulting type after concatenation
     type Output;
 
-    /// Flattens a slice of `T` into a single value `Self::Output`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// assert_eq!(["hello", "world"].concat(), "helloworld");
-    /// assert_eq!([[1, 2], [3, 4]].concat(), [1, 2, 3, 4]);
-    /// ```
-    #[stable(feature = "rust1", since = "1.0.0")]
-    fn concat(&self) -> Self::Output;
-
-    /// Flattens a slice of `T` into a single value `Self::Output`, placing a
-    /// given separator between each.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// assert_eq!(["hello", "world"].join(" "), "hello world");
-    /// assert_eq!([[1, 2], [3, 4]].join(&0), [1, 2, 0, 3, 4]);
-    /// ```
-    #[stable(feature = "rename_connect_to_join", since = "1.3.0")]
-    fn join(&self, sep: &T) -> Self::Output;
-
-    #[stable(feature = "rust1", since = "1.0.0")]
-    #[rustc_deprecated(since = "1.3.0", reason = "renamed to join")]
-    fn connect(&self, sep: &T) -> Self::Output;
+    /// Implementation of [`[T]::concat`](../../std/primitive.slice.html#method.concat)
+    #[unstable(feature = "slice_concat_trait", issue = "27747")]
+    fn concat(slice: &Self) -> Self::Output;
 }
 
-#[unstable(feature = "slice_concat_ext",
-           reason = "trait should not have to exist",
-           issue = "27747")]
-impl<T: Clone, V: Borrow<[T]>> SliceConcatExt<T> for [V] {
+/// Helper trait for [`[T]::join`](../../std/primitive.slice.html#method.join)
+#[unstable(feature = "slice_concat_trait", issue = "27747")]
+pub trait Join<Separator> {
+    #[unstable(feature = "slice_concat_trait", issue = "27747")]
+    /// The resulting type after concatenation
+    type Output;
+
+    /// Implementation of [`[T]::join`](../../std/primitive.slice.html#method.join)
+    #[unstable(feature = "slice_concat_trait", issue = "27747")]
+    fn join(slice: &Self, sep: Separator) -> Self::Output;
+}
+
+#[unstable(feature = "slice_concat_ext", issue = "27747")]
+impl<T: Clone, V: Borrow<[T]>> Concat<T> for [V] {
     type Output = Vec<T>;
 
-    fn concat(&self) -> Vec<T> {
-        let size = self.iter().fold(0, |acc, v| acc + v.borrow().len());
+    fn concat(slice: &Self) -> Vec<T> {
+        let size = slice.iter().map(|slice| slice.borrow().len()).sum();
         let mut result = Vec::with_capacity(size);
-        for v in self {
+        for v in slice {
             result.extend_from_slice(v.borrow())
         }
         result
     }
+}
 
-    fn join(&self, sep: &T) -> Vec<T> {
-        let mut iter = self.iter();
+#[unstable(feature = "slice_concat_ext", issue = "27747")]
+impl<T: Clone, V: Borrow<[T]>> Join<&T> for [V] {
+    type Output = Vec<T>;
+
+    fn join(slice: &Self, sep: &T) -> Vec<T> {
+        let mut iter = slice.iter();
         let first = match iter.next() {
             Some(first) => first,
             None => return vec![],
         };
-        let size = self.iter().fold(0, |acc, v| acc + v.borrow().len());
-        let mut result = Vec::with_capacity(size + self.len());
+        let size = slice.iter().map(|v| v.borrow().len()).sum::<usize>() + slice.len() - 1;
+        let mut result = Vec::with_capacity(size);
         result.extend_from_slice(first.borrow());
 
         for v in iter {
@@ -581,9 +676,28 @@ impl<T: Clone, V: Borrow<[T]>> SliceConcatExt<T> for [V] {
         }
         result
     }
+}
 
-    fn connect(&self, sep: &T) -> Vec<T> {
-        self.join(sep)
+#[unstable(feature = "slice_concat_ext", issue = "27747")]
+impl<T: Clone, V: Borrow<[T]>> Join<&[T]> for [V] {
+    type Output = Vec<T>;
+
+    fn join(slice: &Self, sep: &[T]) -> Vec<T> {
+        let mut iter = slice.iter();
+        let first = match iter.next() {
+            Some(first) => first,
+            None => return vec![],
+        };
+        let size =
+            slice.iter().map(|v| v.borrow().len()).sum::<usize>() + sep.len() * (slice.len() - 1);
+        let mut result = Vec::with_capacity(size);
+        result.extend_from_slice(first.borrow());
+
+        for v in iter {
+            result.extend_from_slice(sep);
+            result.extend_from_slice(v.borrow())
+        }
+        result
     }
 }
 
@@ -640,7 +754,8 @@ impl<T: Clone> ToOwned for [T] {
 ///
 /// This is the integral subroutine of insertion sort.
 fn insert_head<T, F>(v: &mut [T], is_less: &mut F)
-    where F: FnMut(&T, &T) -> bool
+where
+    F: FnMut(&T, &T) -> bool,
 {
     if v.len() >= 2 && is_less(&v[1], &v[0]) {
         unsafe {
@@ -673,10 +788,7 @@ fn insert_head<T, F>(v: &mut [T], is_less: &mut F)
             // If `is_less` panics at any point during the process, `hole` will get dropped and
             // fill the hole in `v` with `tmp`, thus ensuring that `v` still holds every object it
             // initially held exactly once.
-            let mut hole = InsertionHole {
-                src: &mut *tmp,
-                dest: &mut v[1],
-            };
+            let mut hole = InsertionHole { src: &mut *tmp, dest: &mut v[1] };
             ptr::copy_nonoverlapping(&v[1], &mut v[0], 1);
 
             for i in 2..v.len() {
@@ -698,7 +810,9 @@ fn insert_head<T, F>(v: &mut [T], is_less: &mut F)
 
     impl<T> Drop for InsertionHole<T> {
         fn drop(&mut self) {
-            unsafe { ptr::copy_nonoverlapping(self.src, self.dest, 1); }
+            unsafe {
+                ptr::copy_nonoverlapping(self.src, self.dest, 1);
+            }
         }
     }
 }
@@ -711,12 +825,13 @@ fn insert_head<T, F>(v: &mut [T], is_less: &mut F)
 /// The two slices must be non-empty and `mid` must be in bounds. Buffer `buf` must be long enough
 /// to hold a copy of the shorter slice. Also, `T` must not be a zero-sized type.
 unsafe fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
-    where F: FnMut(&T, &T) -> bool
+where
+    F: FnMut(&T, &T) -> bool,
 {
     let len = v.len();
     let v = v.as_mut_ptr();
-    let v_mid = v.offset(mid as isize);
-    let v_end = v.offset(len as isize);
+    let v_mid = v.add(mid);
+    let v_end = v.add(len);
 
     // The merge process first copies the shorter run into `buf`. Then it traces the newly copied
     // run and the longer run forwards (or backwards), comparing their next unconsumed elements and
@@ -740,11 +855,7 @@ unsafe fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
     if mid <= len - mid {
         // The left run is shorter.
         ptr::copy_nonoverlapping(v, buf, mid);
-        hole = MergeHole {
-            start: buf,
-            end: buf.offset(mid as isize),
-            dest: v,
-        };
+        hole = MergeHole { start: buf, end: buf.add(mid), dest: v };
 
         // Initially, these pointers point to the beginnings of their arrays.
         let left = &mut hole.start;
@@ -764,11 +875,7 @@ unsafe fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
     } else {
         // The right run is shorter.
         ptr::copy_nonoverlapping(v_mid, buf, len - mid);
-        hole = MergeHole {
-            start: buf,
-            end: buf.offset((len - mid) as isize),
-            dest: v_mid,
-        };
+        hole = MergeHole { start: buf, end: buf.add(len - mid), dest: v_mid };
 
         // Initially, these pointers point past the ends of their arrays.
         let left = &mut hole.dest;
@@ -811,7 +918,9 @@ unsafe fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
         fn drop(&mut self) {
             // `T` is not a zero-sized type, so it's okay to divide by its size.
             let len = (self.end as usize - self.start as usize) / mem::size_of::<T>();
-            unsafe { ptr::copy_nonoverlapping(self.start, self.dest, len); }
+            unsafe {
+                ptr::copy_nonoverlapping(self.start, self.dest, len);
+            }
         }
     }
 }
@@ -829,7 +938,8 @@ unsafe fn merge<T, F>(v: &mut [T], mid: usize, buf: *mut T, is_less: &mut F)
 ///
 /// The invariants ensure that the total running time is `O(n log n)` worst-case.
 fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
-    where F: FnMut(&T, &T) -> bool
+where
+    F: FnMut(&T, &T) -> bool,
 {
     // Slices of up to this length get sorted using insertion sort.
     const MAX_INSERTION: usize = 20;
@@ -846,7 +956,7 @@ fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
     // Short arrays get sorted in-place via insertion sort to avoid allocations.
     if len <= MAX_INSERTION {
         if len >= 2 {
-            for i in (0..len-1).rev() {
+            for i in (0..len - 1).rev() {
                 insert_head(&mut v[i..], &mut is_less);
             }
         }
@@ -872,14 +982,13 @@ fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
             start -= 1;
             unsafe {
                 if is_less(v.get_unchecked(start + 1), v.get_unchecked(start)) {
-                    while start > 0 && is_less(v.get_unchecked(start),
-                                               v.get_unchecked(start - 1)) {
+                    while start > 0 && is_less(v.get_unchecked(start), v.get_unchecked(start - 1)) {
                         start -= 1;
                     }
                     v[start..end].reverse();
                 } else {
-                    while start > 0 && !is_less(v.get_unchecked(start),
-                                                v.get_unchecked(start - 1)) {
+                    while start > 0 && !is_less(v.get_unchecked(start), v.get_unchecked(start - 1))
+                    {
                         start -= 1;
                     }
                 }
@@ -894,10 +1003,7 @@ fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
         }
 
         // Push this run onto the stack.
-        runs.push(Run {
-            start,
-            len: end - start,
-        });
+        runs.push(Run { start, len: end - start });
         end = start;
 
         // Merge some pairs of adjacent runs to satisfy the invariants.
@@ -905,13 +1011,14 @@ fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
             let left = runs[r + 1];
             let right = runs[r];
             unsafe {
-                merge(&mut v[left.start .. right.start + right.len], left.len, buf.as_mut_ptr(),
-                      &mut is_less);
+                merge(
+                    &mut v[left.start..right.start + right.len],
+                    left.len,
+                    buf.as_mut_ptr(),
+                    &mut is_less,
+                );
             }
-            runs[r] = Run {
-                start: left.start,
-                len: left.len + right.len,
-            };
+            runs[r] = Run { start: left.start, len: left.len + right.len };
             runs.remove(r + 1);
         }
     }
@@ -936,15 +1043,13 @@ fn merge_sort<T, F>(v: &mut [T], mut is_less: F)
     #[inline]
     fn collapse(runs: &[Run]) -> Option<usize> {
         let n = runs.len();
-        if n >= 2 && (runs[n - 1].start == 0 ||
-                      runs[n - 2].len <= runs[n - 1].len ||
-                      (n >= 3 && runs[n - 3].len <= runs[n - 2].len + runs[n - 1].len) ||
-                      (n >= 4 && runs[n - 4].len <= runs[n - 3].len + runs[n - 2].len)) {
-            if n >= 3 && runs[n - 3].len < runs[n - 1].len {
-                Some(n - 3)
-            } else {
-                Some(n - 2)
-            }
+        if n >= 2
+            && (runs[n - 1].start == 0
+                || runs[n - 2].len <= runs[n - 1].len
+                || (n >= 3 && runs[n - 3].len <= runs[n - 2].len + runs[n - 1].len)
+                || (n >= 4 && runs[n - 4].len <= runs[n - 3].len + runs[n - 2].len))
+        {
+            if n >= 3 && runs[n - 3].len < runs[n - 1].len { Some(n - 3) } else { Some(n - 2) }
         } else {
             None
         }

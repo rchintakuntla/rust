@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use std::ops::AddAssign;
 
 struct Int(i32);
@@ -20,15 +10,18 @@ impl AddAssign for Int {
 
 fn main() {
     let mut x = Int(1);
-    x   //~ error: use of moved value: `x`
-    //~^ value used here after move
+    x
+    //~^ NOTE borrow of `x` occurs here
     +=
-    x;  //~ value moved here
+    x;
+    //~^ ERROR cannot move out of `x` because it is borrowed
+    //~| move out of `x` occurs here
 
     let y = Int(2);
-    //~^ consider changing this to `mut y`
-    y   //~ error: cannot borrow immutable local variable `y` as mutable
-        //~| cannot borrow
+    //~^ HELP consider changing this to be mutable
+    //~| SUGGESTION mut y
+    y   //~ ERROR cannot borrow `y` as mutable, as it is not declared as mutable
+        //~| cannot borrow as mutable
     +=
     Int(1);
 }

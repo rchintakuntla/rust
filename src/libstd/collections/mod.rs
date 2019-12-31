@@ -1,13 +1,3 @@
-// Copyright 2013-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Collection types.
 //!
 //! Rust's standard collection library provides efficient implementations of the
@@ -160,10 +150,9 @@
 //! Any `with_capacity` constructor will instruct the collection to allocate
 //! enough space for the specified number of elements. Ideally this will be for
 //! exactly that many elements, but some implementation details may prevent
-//! this. [`Vec`] and [`VecDeque`] can be relied on to allocate exactly the
-//! requested amount, though. Use `with_capacity` when you know exactly how many
-//! elements will be inserted, or at least have a reasonable upper-bound on that
-//! number.
+//! this. See collection-specific documentation for details. In general, use
+//! `with_capacity` when you know exactly how many elements will be inserted, or
+//! at least have a reasonable upper-bound on that number.
 //!
 //! When anticipating a large influx of elements, the `reserve` family of
 //! methods can be used to hint to the collection how much room it should make
@@ -333,8 +322,8 @@
 //! // A client of the bar. They have a blood alcohol level.
 //! struct Person { blood_alcohol: f32 }
 //!
-//! // All the orders made to the bar, by client id.
-//! let orders = vec![1,2,1,2,3,4,1,2,2,3,4,1,1,1];
+//! // All the orders made to the bar, by client ID.
+//! let orders = vec![1, 2, 1, 2, 3, 4, 1, 2, 2, 3, 4, 1, 1, 1];
 //!
 //! // Our clients.
 //! let mut blood_alcohol = BTreeMap::new();
@@ -422,29 +411,29 @@
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_deprecated(reason = "moved to `std::ops::Bound`", since = "1.26.0")]
 #[doc(hidden)]
-pub use ops::Bound;
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use alloc_crate::collections::{BinaryHeap, BTreeMap, BTreeSet};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use alloc_crate::collections::{LinkedList, VecDeque};
+pub use crate::ops::Bound;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use alloc_crate::collections::{binary_heap, btree_map, btree_set};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use alloc_crate::collections::{linked_list, vec_deque};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use alloc_crate::collections::{BTreeMap, BTreeSet, BinaryHeap};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use alloc_crate::collections::{LinkedList, VecDeque};
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::hash_map::HashMap;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::hash_set::HashSet;
 
-#[unstable(feature = "try_reserve", reason = "new API", issue="48043")]
-pub use alloc_crate::collections::CollectionAllocErr;
+#[unstable(feature = "try_reserve", reason = "new API", issue = "48043")]
+pub use alloc_crate::collections::TryReserveError;
 
 mod hash;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 pub mod hash_map {
-    //! A hash map implemented with linear probing and Robin Hood bucket stealing.
+    //! A hash map implemented with quadratic probing and SIMD lookup.
     #[stable(feature = "rust1", since = "1.0.0")]
     pub use super::hash::map::*;
 }

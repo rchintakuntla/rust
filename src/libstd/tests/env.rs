@@ -1,24 +1,12 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-extern crate rand;
-
 use std::env::*;
-use std::ffi::{OsString, OsStr};
+use std::ffi::{OsStr, OsString};
 
-use rand::Rng;
+use rand::distributions::Alphanumeric;
+use rand::{thread_rng, Rng};
 
 fn make_rand_name() -> OsString {
-    let mut rng = rand::thread_rng();
-    let n = format!("TEST{}", rng.gen_ascii_chars().take(10)
-                                 .collect::<String>());
+    let rng = thread_rng();
+    let n = format!("TEST{}", rng.sample_iter(&Alphanumeric).take(10).collect::<String>());
     let n = OsString::from(n);
     assert!(var_os(&n).is_none());
     n
@@ -84,11 +72,7 @@ fn test_env_set_var() {
 
     let mut e = vars_os();
     set_var(&n, "VALUE");
-    assert!(!e.any(|(k, v)| {
-        &*k == &*n && &*v == "VALUE"
-    }));
+    assert!(!e.any(|(k, v)| { &*k == &*n && &*v == "VALUE" }));
 
-    assert!(vars_os().any(|(k, v)| {
-        &*k == &*n && &*v == "VALUE"
-    }));
+    assert!(vars_os().any(|(k, v)| { &*k == &*n && &*v == "VALUE" }));
 }

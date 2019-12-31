@@ -1,23 +1,13 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! A nice wrapper to consume dataflow results at several CFG
 //! locations.
 
 use rustc::mir::{BasicBlock, Location};
-use rustc_data_structures::indexed_set::{IdxSetBuf, Iter};
-use rustc_data_structures::indexed_vec::Idx;
+use rustc_index::bit_set::{BitIter, BitSet, HybridBitSet};
 
-use dataflow::{BitDenotation, BlockSets, DataflowResults};
-use dataflow::move_paths::{HasMoveData, MovePathIndex};
+use crate::dataflow::move_paths::{HasMoveData, MovePathIndex};
+use crate::dataflow::{BitDenotation, DataflowResults, GenKillSet};
 
+use std::borrow::Borrow;
 use std::iter;
 
 /// A trait for "cartesian products" of multiple FlowAtLocation.
@@ -28,14 +18,23 @@ pub trait FlowsAtLocation {
     /// Reset the state bitvector to represent the entry to block `bb`.
     fn reset_to_entry_of(&mut self, bb: BasicBlock);
 
-    /// Build gen + kill sets for statement at `loc`.
+    /// Reset the state bitvector to represent the exit of the
+    /// terminator of block `bb`.
+    ///
+    /// **Important:** In the case of a `Call` terminator, these
+    /// effects do *not* include the result of storing the destination
+    /// of the call, since that is edge-dependent (in other words, the
+    /// effects don't apply to the unwind edge).
+    fn reset_to_exit_of(&mut self, bb: BasicBlock);
+
+    /// Builds gen and kill sets for statement at `loc`.
     ///
     /// Note that invoking this method alone does not change the
     /// `curr_state` -- you must invoke `apply_local_effect`
     /// afterwards.
     fn reconstruct_statement_effect(&mut self, loc: Location);
 
-    /// Build gen + kill sets for terminator for `loc`.
+    /// Builds gen and kill sets for terminator for `loc`.
     ///
     /// Note that invoking this method alone does not change the
     /// `curr_state` -- you must invoke `apply_local_effect`
@@ -59,22 +58,23 @@ pub trait FlowsAtLocation {
 /// effects at any point in the control-flow graph by starting with
 /// the state at the start of the basic block (`reset_to_entry_of`)
 /// and then replaying the effects of statements and terminators
-/// (e.g. via `reconstruct_statement_effect` and
+/// (e.g., via `reconstruct_statement_effect` and
 /// `reconstruct_terminator_effect`; don't forget to call
 /// `apply_local_effect`).
-pub struct FlowAtLocation<BD>
+pub struct FlowAtLocation<'tcx, BD, DR = DataflowResults<'tcx, BD>>
 where
-    BD: BitDenotation,
+    BD: BitDenotation<'tcx>,
+    DR: Borrow<DataflowResults<'tcx, BD>>,
 {
-    base_results: DataflowResults<BD>,
-    curr_state: IdxSetBuf<BD::Idx>,
-    stmt_gen: IdxSetBuf<BD::Idx>,
-    stmt_kill: IdxSetBuf<BD::Idx>,
+    base_results: DR,
+    curr_state: BitSet<BD::Idx>,
+    stmt_trans: GenKillSet<BD::Idx>,
 }
 
-impl<BD> FlowAtLocation<BD>
+impl<'tcx, BD, DR> FlowAtLocation<'tcx, BD, DR>
 where
-    BD: BitDenotation,
+    BD: BitDenotation<'tcx>,
+    DR: Borrow<DataflowResults<'tcx, BD>>,
 {
     /// Iterate over each bit set in the current state.
     pub fn each_state_bit<F>(&self, f: F)
@@ -91,33 +91,27 @@ where
     where
         F: FnMut(BD::Idx),
     {
-        self.stmt_gen.iter().for_each(f)
+        self.stmt_trans.gen_set.iter().for_each(f)
     }
 
-    pub fn new(results: DataflowResults<BD>) -> Self {
-        let bits_per_block = results.sets().bits_per_block();
-        let curr_state = IdxSetBuf::new_empty(bits_per_block);
-        let stmt_gen = IdxSetBuf::new_empty(bits_per_block);
-        let stmt_kill = IdxSetBuf::new_empty(bits_per_block);
-        FlowAtLocation {
-            base_results: results,
-            curr_state: curr_state,
-            stmt_gen: stmt_gen,
-            stmt_kill: stmt_kill,
-        }
+    pub fn new(results: DR) -> Self {
+        let bits_per_block = results.borrow().sets().bits_per_block();
+        let curr_state = BitSet::new_empty(bits_per_block);
+        let stmt_trans = GenKillSet::from_elem(HybridBitSet::new_empty(bits_per_block));
+        FlowAtLocation { base_results: results, curr_state, stmt_trans }
     }
 
     /// Access the underlying operator.
     pub fn operator(&self) -> &BD {
-        self.base_results.operator()
+        self.base_results.borrow().operator()
     }
 
-    pub fn contains(&self, x: &BD::Idx) -> bool {
+    pub fn contains(&self, x: BD::Idx) -> bool {
         self.curr_state.contains(x)
     }
 
     /// Returns an iterator over the elements present in the current state.
-    pub fn iter_incoming(&self) -> iter::Peekable<Iter<BD::Idx>> {
+    pub fn iter_incoming(&self) -> iter::Peekable<BitIter<'_, BD::Idx>> {
         self.curr_state.iter().peekable()
     }
 
@@ -126,82 +120,59 @@ where
     /// Invokes `f` with an iterator over the resulting state.
     pub fn with_iter_outgoing<F>(&self, f: F)
     where
-        F: FnOnce(Iter<BD::Idx>),
+        F: FnOnce(BitIter<'_, BD::Idx>),
     {
         let mut curr_state = self.curr_state.clone();
-        curr_state.union(&self.stmt_gen);
-        curr_state.subtract(&self.stmt_kill);
+        self.stmt_trans.apply(&mut curr_state);
         f(curr_state.iter());
+    }
+
+    /// Returns a bitset of the elements present in the current state.
+    pub fn as_dense(&self) -> &BitSet<BD::Idx> {
+        &self.curr_state
     }
 }
 
-impl<BD> FlowsAtLocation for FlowAtLocation<BD>
-    where BD: BitDenotation
+impl<'tcx, BD, DR> FlowsAtLocation for FlowAtLocation<'tcx, BD, DR>
+where
+    BD: BitDenotation<'tcx>,
+    DR: Borrow<DataflowResults<'tcx, BD>>,
 {
     fn reset_to_entry_of(&mut self, bb: BasicBlock) {
-        self.curr_state.overwrite(self.base_results.sets().on_entry_set_for(bb.index()));
+        self.curr_state.overwrite(self.base_results.borrow().sets().entry_set_for(bb.index()));
+    }
+
+    fn reset_to_exit_of(&mut self, bb: BasicBlock) {
+        self.reset_to_entry_of(bb);
+        let trans = self.base_results.borrow().sets().trans_for(bb.index());
+        trans.apply(&mut self.curr_state)
     }
 
     fn reconstruct_statement_effect(&mut self, loc: Location) {
-        self.stmt_gen.clear();
-        self.stmt_kill.clear();
-        {
-            let mut sets = BlockSets {
-                on_entry: &mut self.curr_state,
-                gen_set: &mut self.stmt_gen,
-                kill_set: &mut self.stmt_kill,
-            };
-            self.base_results
-                .operator()
-                .before_statement_effect(&mut sets, loc);
-        }
-        self.apply_local_effect(loc);
+        self.stmt_trans.clear();
+        self.base_results.borrow().operator().before_statement_effect(&mut self.stmt_trans, loc);
+        self.stmt_trans.apply(&mut self.curr_state);
 
-        let mut sets = BlockSets {
-            on_entry: &mut self.curr_state,
-            gen_set: &mut self.stmt_gen,
-            kill_set: &mut self.stmt_kill,
-        };
-        self.base_results
-            .operator()
-            .statement_effect(&mut sets, loc);
+        self.base_results.borrow().operator().statement_effect(&mut self.stmt_trans, loc);
     }
 
     fn reconstruct_terminator_effect(&mut self, loc: Location) {
-        self.stmt_gen.clear();
-        self.stmt_kill.clear();
-        {
-            let mut sets = BlockSets {
-                on_entry: &mut self.curr_state,
-                gen_set: &mut self.stmt_gen,
-                kill_set: &mut self.stmt_kill,
-            };
-            self.base_results
-                .operator()
-                .before_terminator_effect(&mut sets, loc);
-        }
-        self.apply_local_effect(loc);
+        self.stmt_trans.clear();
+        self.base_results.borrow().operator().before_terminator_effect(&mut self.stmt_trans, loc);
+        self.stmt_trans.apply(&mut self.curr_state);
 
-        let mut sets = BlockSets {
-            on_entry: &mut self.curr_state,
-            gen_set: &mut self.stmt_gen,
-            kill_set: &mut self.stmt_kill,
-        };
-        self.base_results
-            .operator()
-            .terminator_effect(&mut sets, loc);
+        self.base_results.borrow().operator().terminator_effect(&mut self.stmt_trans, loc);
     }
 
     fn apply_local_effect(&mut self, _loc: Location) {
-        self.curr_state.union(&self.stmt_gen);
-        self.curr_state.subtract(&self.stmt_kill);
+        self.stmt_trans.apply(&mut self.curr_state)
     }
 }
 
-
-impl<'tcx, T> FlowAtLocation<T>
+impl<'tcx, T, DR> FlowAtLocation<'tcx, T, DR>
 where
-    T: HasMoveData<'tcx> + BitDenotation<Idx = MovePathIndex>,
+    T: HasMoveData<'tcx> + BitDenotation<'tcx, Idx = MovePathIndex>,
+    DR: Borrow<DataflowResults<'tcx, T>>,
 {
     pub fn has_any_child_of(&self, mpi: T::Idx) -> Option<T::Idx> {
         // We process `mpi` before the loop below, for two reasons:
@@ -209,7 +180,7 @@ where
         //   siblings);
         // - ~99% of the time the loop isn't reached, and this code is hot, so
         //   we don't want to allocate `todo` unnecessarily.
-        if self.contains(&mpi) {
+        if self.contains(mpi) {
             return Some(mpi);
         }
         let move_data = self.operator().move_data();
@@ -221,7 +192,7 @@ where
         };
 
         while let Some(mpi) = todo.pop() {
-            if self.contains(&mpi) {
+            if self.contains(mpi) {
                 return Some(mpi);
             }
             let move_path = &move_data.move_paths[mpi];

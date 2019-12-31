@@ -1,62 +1,57 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! the rustc crate store interface. This also includes types that
 //! are *mostly* used as a part of that interface, but these should
 //! probably get a better home if someone can find one.
 
-use hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
-use hir::map as hir_map;
-use hir::map::definitions::{DefKey, DefPathTable};
-use hir::svh::Svh;
-use ty::{self, TyCtxt};
-use session::{Session, CrateDisambiguator};
-use session::search_paths::PathKind;
+use crate::hir::def_id::{CrateNum, DefId, LOCAL_CRATE};
+use crate::hir::map as hir_map;
+use crate::hir::map::definitions::{DefKey, DefPathTable};
+use crate::session::search_paths::PathKind;
+use crate::session::{CrateDisambiguator, Session};
+use crate::ty::{self, TyCtxt};
+use rustc_data_structures::svh::Svh;
 
+use rustc_data_structures::sync::{self, MetadataRef};
+use rustc_macros::HashStable;
+use rustc_target::spec::Target;
 use std::any::Any;
 use std::path::{Path, PathBuf};
 use syntax::ast;
+use syntax::expand::allocator::AllocatorKind;
 use syntax::symbol::Symbol;
 use syntax_pos::Span;
-use rustc_target::spec::Target;
-use rustc_data_structures::sync::{self, MetadataRef, Lrc};
 
 pub use self::NativeLibraryKind::*;
+pub use rustc_session::utils::NativeLibraryKind;
 
 // lonely orphan structs and enums looking for a better home
 
-#[derive(Clone, Debug, Copy)]
-pub struct LinkMeta {
-    pub crate_hash: Svh,
-}
-
 /// Where a crate came from on the local filesystem. One of these three options
 /// must be non-None.
-#[derive(PartialEq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug, HashStable)]
 pub struct CrateSource {
     pub dylib: Option<(PathBuf, PathKind)>,
     pub rlib: Option<(PathBuf, PathKind)>,
     pub rmeta: Option<(PathBuf, PathKind)>,
 }
 
-#[derive(RustcEncodable, RustcDecodable, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Debug)]
+impl CrateSource {
+    pub fn paths(&self) -> impl Iterator<Item = &PathBuf> {
+        self.dylib.iter().chain(self.rlib.iter()).chain(self.rmeta.iter()).map(|p| &p.0)
+    }
+}
+
+#[derive(
+    RustcEncodable,
+    RustcDecodable,
+    Copy,
+    Clone,
+    Ord,
+    PartialOrd,
+    Eq,
+    PartialEq,
+    Debug,
+    HashStable
+)]
 pub enum DepKind {
     /// A dependency that is only used for its macros, none of which are visible from other crates.
     /// These are included in the metadata only as placeholders and are ignored when decoding.
@@ -64,7 +59,7 @@ pub enum DepKind {
     /// A dependency that is only used for its macros.
     MacrosOnly,
     /// A dependency that is always injected into the dependency list and so
-    /// doesn't need to be linked to an rlib, e.g. the injected allocator.
+    /// doesn't need to be linked to an rlib, e.g., the injected allocator.
     Implicit,
     /// A dependency that is required by an rlib version of this crate.
     /// Ordinary `extern crate`s result in `Explicit` dependencies.
@@ -89,11 +84,7 @@ pub enum LibSource {
 
 impl LibSource {
     pub fn is_some(&self) -> bool {
-        if let LibSource::Some(_) = *self {
-            true
-        } else {
-            false
-        }
+        if let LibSource::Some(_) = *self { true } else { false }
     }
 
     pub fn option(&self) -> Option<PathBuf> {
@@ -104,25 +95,13 @@ impl LibSource {
     }
 }
 
-#[derive(Copy, Debug, PartialEq, Clone, RustcEncodable, RustcDecodable)]
+#[derive(Copy, Debug, PartialEq, Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub enum LinkagePreference {
     RequireDynamic,
     RequireStatic,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, RustcEncodable, RustcDecodable)]
-pub enum NativeLibraryKind {
-    /// native static library (.a archive)
-    NativeStatic,
-    /// native static library, which doesn't get bundled into .rlibs
-    NativeStaticNobundle,
-    /// macOS-specific
-    NativeFramework,
-    /// default way to specify a dynamic library
-    NativeUnknown,
-}
-
-#[derive(Clone, RustcEncodable, RustcDecodable)]
+#[derive(Clone, Debug, RustcEncodable, RustcDecodable, HashStable)]
 pub struct NativeLibrary {
     pub kind: NativeLibraryKind,
     pub name: Option<Symbol>,
@@ -131,13 +110,13 @@ pub struct NativeLibrary {
     pub wasm_import_module: Option<Symbol>,
 }
 
-#[derive(Clone, Hash, RustcEncodable, RustcDecodable)]
+#[derive(Clone, RustcEncodable, RustcDecodable, HashStable)]
 pub struct ForeignModule {
     pub foreign_items: Vec<DefId>,
     pub def_id: DefId,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, HashStable)]
 pub struct ExternCrate {
     pub src: ExternCrateSource,
 
@@ -148,13 +127,27 @@ pub struct ExternCrate {
     /// used to select the extern with the shortest path
     pub path_len: usize,
 
+    /// Crate that depends on this crate
+    pub dependency_of: CrateNum,
+}
+
+impl ExternCrate {
     /// If true, then this crate is the crate named by the extern
     /// crate referenced above. If false, then this crate is a dep
     /// of the crate.
-    pub direct: bool,
+    pub fn is_direct(&self) -> bool {
+        self.dependency_of == LOCAL_CRATE
+    }
+
+    pub fn rank(&self) -> impl PartialOrd {
+        // Prefer:
+        // - direct extern crate to indirect
+        // - shorter paths to longer
+        (self.is_direct(), !self.path_len)
+    }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, HashStable)]
 pub enum ExternCrateSource {
     /// Crate is loaded by `extern crate`.
     Extern(
@@ -163,21 +156,17 @@ pub enum ExternCrateSource {
         /// such ids
         DefId,
     ),
-    // Crate is loaded by `use`.
-    Use,
-    /// Crate is implicitly loaded by an absolute or an `extern::` path.
+    /// Crate is implicitly loaded by a path resolving through extern prelude.
     Path,
 }
 
 pub struct EncodedMetadata {
-    pub raw_data: Vec<u8>
+    pub raw_data: Vec<u8>,
 }
 
 impl EncodedMetadata {
     pub fn new() -> EncodedMetadata {
-        EncodedMetadata {
-            raw_data: Vec::new(),
-        }
+        EncodedMetadata { raw_data: Vec::new() }
     }
 }
 
@@ -190,18 +179,13 @@ impl EncodedMetadata {
 /// metadata in library -- this trait just serves to decouple rustc_metadata from
 /// the archive reader, which depends on LLVM.
 pub trait MetadataLoader {
-    fn get_rlib_metadata(&self,
-                         target: &Target,
-                         filename: &Path)
-                         -> Result<MetadataRef, String>;
-    fn get_dylib_metadata(&self,
-                          target: &Target,
-                          filename: &Path)
-                          -> Result<MetadataRef, String>;
+    fn get_rlib_metadata(&self, target: &Target, filename: &Path) -> Result<MetadataRef, String>;
+    fn get_dylib_metadata(&self, target: &Target, filename: &Path) -> Result<MetadataRef, String>;
 }
 
-/// A store of Rust crates, through with their metadata
-/// can be accessed.
+pub type MetadataLoaderDyn = dyn MetadataLoader + Sync;
+
+/// A store of Rust crates, through which their metadata can be accessed.
 ///
 /// Note that this trait should probably not be expanding today. All new
 /// functionality should be driven through queries instead!
@@ -211,32 +195,29 @@ pub trait MetadataLoader {
 /// (it'd break incremental compilation) and should only be called pre-HIR (e.g.
 /// during resolve)
 pub trait CrateStore {
-    fn crate_data_as_rc_any(&self, krate: CrateNum) -> Lrc<dyn Any>;
+    fn as_any(&self) -> &dyn Any;
 
     // resolve
     fn def_key(&self, def: DefId) -> DefKey;
     fn def_path(&self, def: DefId) -> hir_map::DefPath;
     fn def_path_hash(&self, def: DefId) -> hir_map::DefPathHash;
-    fn def_path_table(&self, cnum: CrateNum) -> Lrc<DefPathTable>;
+    fn def_path_table(&self, cnum: CrateNum) -> &DefPathTable;
 
     // "queries" used in resolve that aren't tracked for incremental compilation
     fn crate_name_untracked(&self, cnum: CrateNum) -> Symbol;
+    fn crate_is_private_dep_untracked(&self, cnum: CrateNum) -> bool;
     fn crate_disambiguator_untracked(&self, cnum: CrateNum) -> CrateDisambiguator;
     fn crate_hash_untracked(&self, cnum: CrateNum) -> Svh;
-    fn extern_mod_stmt_cnum_untracked(&self, emod_id: ast::NodeId) -> Option<CrateNum>;
     fn item_generics_cloned_untracked(&self, def: DefId, sess: &Session) -> ty::Generics;
-    fn postorder_cnums_untracked(&self) -> Vec<CrateNum>;
 
     // This is basically a 1-based range of ints, which is a little
     // silly - I may fix that.
     fn crates_untracked(&self) -> Vec<CrateNum>;
 
     // utility functions
-    fn encode_metadata<'a, 'tcx>(&self,
-                                 tcx: TyCtxt<'a, 'tcx, 'tcx>,
-                                 link_meta: &LinkMeta)
-                                 -> EncodedMetadata;
+    fn encode_metadata(&self, tcx: TyCtxt<'_>) -> EncodedMetadata;
     fn metadata_encoding_version(&self) -> &[u8];
+    fn allocator_kind(&self) -> Option<AllocatorKind>;
 }
 
 pub type CrateStoreDyn = dyn CrateStore + sync::Sync;
@@ -250,15 +231,14 @@ pub type CrateStoreDyn = dyn CrateStore + sync::Sync;
 // In order to get this left-to-right dependency ordering, we perform a
 // topological sort of all crates putting the leaves at the right-most
 // positions.
-pub fn used_crates(tcx: TyCtxt, prefer: LinkagePreference)
-    -> Vec<(CrateNum, LibSource)>
-{
-    let mut libs = tcx.crates()
+pub fn used_crates(tcx: TyCtxt<'_>, prefer: LinkagePreference) -> Vec<(CrateNum, LibSource)> {
+    let mut libs = tcx
+        .crates()
         .iter()
         .cloned()
         .filter_map(|cnum| {
             if tcx.dep_kind(cnum).macros_only() {
-                return None
+                return None;
             }
             let source = tcx.used_crate_source(cnum);
             let path = match prefer {
@@ -278,10 +258,8 @@ pub fn used_crates(tcx: TyCtxt, prefer: LinkagePreference)
             Some((cnum, path))
         })
         .collect::<Vec<_>>();
-    let mut ordering = tcx.postorder_cnums(LOCAL_CRATE);
-    Lrc::make_mut(&mut ordering).reverse();
-    libs.sort_by_cached_key(|&(a, _)| {
-        ordering.iter().position(|x| *x == a)
-    });
+    let mut ordering = tcx.postorder_cnums(LOCAL_CRATE).to_owned();
+    ordering.reverse();
+    libs.sort_by_cached_key(|&(a, _)| ordering.iter().position(|x| *x == a));
     libs
 }

@@ -1,14 +1,3 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-
 // This test case tests the incremental compilation hash (ICH) implementation
 // for function and method call expressions.
 
@@ -16,7 +5,7 @@
 // and make sure that the hash has changed, then change nothing between rev2 and
 // rev3 and make sure that the hash has not changed.
 
-// compile-pass
+// build-pass (FIXME(62277): could be check-pass?)
 // revisions: cfail1 cfail2 cfail3
 // compile-flags: -Z query-dep-graph -Zincremental-ignore-spans
 
@@ -29,14 +18,14 @@ fn callee1(_x: u32, _y: i64) {}
 fn callee2(_x: u32, _y: i64) {}
 
 
-// Change Callee (Function) ----------------------------------------------------
+// Change Callee (Function)
 #[cfg(cfail1)]
 pub fn change_callee_function() {
     callee1(1, 2)
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized,TypeckTables")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir,typeck_tables_of")]
 #[rustc_clean(cfg="cfail3")]
 pub fn change_callee_function() {
     callee2(1, 2)
@@ -44,14 +33,14 @@ pub fn change_callee_function() {
 
 
 
-// Change Argument (Function) --------------------------------------------------
+// Change Argument (Function)
 #[cfg(cfail1)]
 pub fn change_argument_function() {
     callee1(1, 2)
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 pub fn change_argument_function() {
     callee1(1, 3)
@@ -59,7 +48,7 @@ pub fn change_argument_function() {
 
 
 
-// Change Callee Indirectly (Function) -----------------------------------------
+// Change Callee Indirectly (Function)
 mod change_callee_indirectly_function {
     #[cfg(cfail1)]
     use super::callee1 as callee;
@@ -84,7 +73,7 @@ impl Struct {
     fn method2(&self, _x: char, _y: bool) {}
 }
 
-// Change Callee (Method) ------------------------------------------------------
+// Change Callee (Method)
 #[cfg(cfail1)]
 pub fn change_callee_method() {
     let s = Struct;
@@ -92,7 +81,7 @@ pub fn change_callee_method() {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized,TypeckTables")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir,typeck_tables_of")]
 #[rustc_clean(cfg="cfail3")]
 pub fn change_callee_method() {
     let s = Struct;
@@ -101,7 +90,7 @@ pub fn change_callee_method() {
 
 
 
-// Change Argument (Method) ----------------------------------------------------
+// Change Argument (Method)
 #[cfg(cfail1)]
 pub fn change_argument_method() {
     let s = Struct;
@@ -109,7 +98,7 @@ pub fn change_argument_method() {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 pub fn change_argument_method() {
     let s = Struct;
@@ -118,7 +107,7 @@ pub fn change_argument_method() {
 
 
 
-// Change Callee (Method, UFCS) ------------------------------------------------
+// Change Callee (Method, UFCS)
 #[cfg(cfail1)]
 pub fn change_ufcs_callee_method() {
     let s = Struct;
@@ -126,7 +115,7 @@ pub fn change_ufcs_callee_method() {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized,TypeckTables")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir,typeck_tables_of")]
 #[rustc_clean(cfg="cfail3")]
 pub fn change_ufcs_callee_method() {
     let s = Struct;
@@ -135,7 +124,7 @@ pub fn change_ufcs_callee_method() {
 
 
 
-// Change Argument (Method, UFCS) ----------------------------------------------
+// Change Argument (Method, UFCS)
 #[cfg(cfail1)]
 pub fn change_argument_method_ufcs() {
     let s = Struct;
@@ -143,7 +132,7 @@ pub fn change_argument_method_ufcs() {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 pub fn change_argument_method_ufcs() {
     let s = Struct;
@@ -152,7 +141,7 @@ pub fn change_argument_method_ufcs() {
 
 
 
-// Change To UFCS --------------------------------------------------------------
+// Change To UFCS
 #[cfg(cfail1)]
 pub fn change_to_ufcs() {
     let s = Struct;
@@ -160,7 +149,7 @@ pub fn change_to_ufcs() {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized,TypeckTables")]
+#[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir,typeck_tables_of")]
 #[rustc_clean(cfg="cfail3")]
 // One might think this would be expanded in the HirBody/Mir, but it actually
 // results in slightly different Hir/Mir.
@@ -175,14 +164,14 @@ impl Struct2 {
     fn method1(&self, _x: char, _y: bool) {}
 }
 
-// Change UFCS Callee Indirectly -----------------------------------------------
+// Change UFCS Callee Indirectly
 pub mod change_ufcs_callee_indirectly {
     #[cfg(cfail1)]
     use super::Struct as Struct;
     #[cfg(not(cfail1))]
     use super::Struct2 as Struct;
 
-    #[rustc_clean(cfg="cfail2", except="HirBody,MirValidated,MirOptimized,TypeckTables")]
+    #[rustc_clean(cfg="cfail2", except="HirBody,mir_built,optimized_mir,typeck_tables_of")]
     #[rustc_clean(cfg="cfail3")]
 
 

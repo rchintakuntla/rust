@@ -1,14 +1,3 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-
 // This test case tests the incremental compilation hash (ICH) implementation
 // for inline asm.
 
@@ -16,7 +5,7 @@
 // and make sure that the hash has changed, then change nothing between rev2 and
 // rev3 and make sure that the hash has not changed.
 
-// compile-pass
+// build-pass (FIXME(62277): could be check-pass?)
 // revisions: cfail1 cfail2 cfail3
 // compile-flags: -Z query-dep-graph -Zincremental-ignore-spans
 
@@ -27,7 +16,7 @@
 
 
 
-// Change template -------------------------------------------------------------
+// Change template
 #[cfg(cfail1)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_template(a: i32) -> i32 {
@@ -44,7 +33,7 @@ pub fn change_template(a: i32) -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody, mir_built, optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_template(a: i32) -> i32 {
@@ -62,7 +51,7 @@ pub fn change_template(a: i32) -> i32 {
 
 
 
-// Change output -------------------------------------------------------------
+// Change output
 #[cfg(cfail1)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_output(a: i32) -> i32 {
@@ -80,7 +69,7 @@ pub fn change_output(a: i32) -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody, mir_built, optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_output(a: i32) -> i32 {
@@ -99,7 +88,7 @@ pub fn change_output(a: i32) -> i32 {
 
 
 
-// Change input -------------------------------------------------------------
+// Change input
 #[cfg(cfail1)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_input(_a: i32, _b: i32) -> i32 {
@@ -116,7 +105,7 @@ pub fn change_input(_a: i32, _b: i32) -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody, mir_built, optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_input(_a: i32, _b: i32) -> i32 {
@@ -134,7 +123,7 @@ pub fn change_input(_a: i32, _b: i32) -> i32 {
 
 
 
-// Change input constraint -----------------------------------------------------
+// Change input constraint
 #[cfg(cfail1)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_input_constraint(_a: i32, _b: i32) -> i32 {
@@ -151,7 +140,7 @@ pub fn change_input_constraint(_a: i32, _b: i32) -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody, mir_built, optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_input_constraint(_a: i32, _b: i32) -> i32 {
@@ -169,7 +158,7 @@ pub fn change_input_constraint(_a: i32, _b: i32) -> i32 {
 
 
 
-// Change clobber --------------------------------------------------------------
+// Change clobber
 #[cfg(cfail1)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_clobber(_a: i32) -> i32 {
@@ -186,7 +175,7 @@ pub fn change_clobber(_a: i32) -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody, mir_built, optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_clobber(_a: i32) -> i32 {
@@ -204,7 +193,7 @@ pub fn change_clobber(_a: i32) -> i32 {
 
 
 
-// Change options --------------------------------------------------------------
+// Change options
 #[cfg(cfail1)]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_options(_a: i32) -> i32 {
@@ -221,7 +210,7 @@ pub fn change_options(_a: i32) -> i32 {
 }
 
 #[cfg(not(cfail1))]
-#[rustc_clean(cfg="cfail2", except="HirBody, MirValidated, MirOptimized")]
+#[rustc_clean(cfg="cfail2", except="HirBody, mir_built, optimized_mir")]
 #[rustc_clean(cfg="cfail3")]
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub fn change_options(_a: i32) -> i32 {

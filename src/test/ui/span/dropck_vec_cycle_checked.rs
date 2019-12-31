@@ -1,21 +1,6 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-// compile-flags: -Z nll-subminimal-causes
-// (Work around rust-lang/rust#49998 by opting into nll-subminimal-causes.)
-
 // Reject mixing cyclic structure and Drop when using Vec.
 //
 // (Compare against compile-fail/dropck_arr_cycle_checked.rs)
-
-
 
 use std::cell::Cell;
 use id::Id;
@@ -115,13 +100,10 @@ fn f() {
     c1.v[1].v.set(Some(&c3));
     //~^ ERROR `c3` does not live long enough
     c2.v[0].v.set(Some(&c2));
-    //~^ ERROR `c2` does not live long enough
     c2.v[1].v.set(Some(&c3));
-    //~^ ERROR `c3` does not live long enough
     c3.v[0].v.set(Some(&c1));
     //~^ ERROR `c1` does not live long enough
     c3.v[1].v.set(Some(&c2));
-    //~^ ERROR `c2` does not live long enough
 }
 
 fn main() {

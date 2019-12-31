@@ -1,18 +1,9 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+#![deny(warnings)]
 
 use std::env;
-use std::process::Command;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::fs::File;
-use std::io::Write;
+use std::process::Command;
 
 struct Test {
     repo: &'static str,
@@ -26,20 +17,20 @@ const TEST_REPOS: &'static [Test] = &[
     Test {
         name: "iron",
         repo: "https://github.com/iron/iron",
-        sha: "21c7dae29c3c214c08533c2a55ac649b418f2fe3",
-        lock: Some(include_str!("lockfiles/iron-Cargo.lock")),
+        sha: "cf056ea5e8052c1feea6141e40ab0306715a2c33",
+        lock: None,
         packages: &[],
     },
     Test {
         name: "ripgrep",
         repo: "https://github.com/BurntSushi/ripgrep",
-        sha: "b65bb37b14655e1a89c7cd19c8b011ef3e312791",
+        sha: "ad9befbc1d3b5c695e7f6b6734ee1b8e683edd41",
         lock: None,
         packages: &[],
     },
     Test {
         name: "tokei",
-        repo: "https://github.com/Aaronepower/tokei",
+        repo: "https://github.com/XAMPPRocky/tokei",
         sha: "5e11c4852fe4aa086b0e4fe5885822fbe57ba928",
         lock: None,
         packages: &[],
@@ -61,16 +52,16 @@ const TEST_REPOS: &'static [Test] = &[
     Test {
         name: "servo",
         repo: "https://github.com/servo/servo",
-        sha: "17e97b9320fdb7cdb33bbc5f4d0fde0653bbf2e4",
+        sha: "caac107ae8145ef2fd20365e2b8fadaf09c2eb3b",
         lock: None,
         // Only test Stylo a.k.a. Quantum CSS, the parts of Servo going into Firefox.
         // This takes much less time to build than all of Servo and supports stable Rust.
-        packages: &["stylo_tests", "selectors"],
+        packages: &["selectors"],
     },
     Test {
         name: "webrender",
         repo: "https://github.com/servo/webrender",
-        sha: "57250b2b8fa63934f80e5376a29f7dcb3f759ad6",
+        sha: "a3d6e6894c5a601fa547c6273eb963ca1321c2bb",
         lock: None,
         packages: &[],
     },
@@ -91,10 +82,7 @@ fn test_repo(cargo: &Path, out_dir: &Path, test: &Test) {
     println!("testing {}", test.repo);
     let dir = clone_repo(test, out_dir);
     if let Some(lockfile) = test.lock {
-        File::create(&dir.join("Cargo.lock"))
-            .expect("")
-            .write_all(lockfile.as_bytes())
-            .expect("");
+        fs::write(&dir.join("Cargo.lock"), lockfile).unwrap();
     }
     if !run_cargo_test(cargo, &dir, test.packages) {
         panic!("tests failed for {}", test.repo);
@@ -105,11 +93,7 @@ fn clone_repo(test: &Test, out_dir: &Path) -> PathBuf {
     let out_dir = out_dir.join(test.name);
 
     if !out_dir.join(".git").is_dir() {
-        let status = Command::new("git")
-                         .arg("init")
-                         .arg(&out_dir)
-                         .status()
-                         .expect("");
+        let status = Command::new("git").arg("init").arg(&out_dir).status().expect("");
         assert!(status.success());
     }
 
@@ -118,23 +102,23 @@ fn clone_repo(test: &Test, out_dir: &Path) -> PathBuf {
     for depth in &[0, 1, 10, 100, 1000, 100000] {
         if *depth > 0 {
             let status = Command::new("git")
-                             .arg("fetch")
-                             .arg(test.repo)
-                             .arg("master")
-                             .arg(&format!("--depth={}", depth))
-                             .current_dir(&out_dir)
-                             .status()
-                             .expect("");
+                .arg("fetch")
+                .arg(test.repo)
+                .arg("master")
+                .arg(&format!("--depth={}", depth))
+                .current_dir(&out_dir)
+                .status()
+                .expect("");
             assert!(status.success());
         }
 
         let status = Command::new("git")
-                         .arg("reset")
-                         .arg(test.sha)
-                         .arg("--hard")
-                         .current_dir(&out_dir)
-                         .status()
-                         .expect("");
+            .arg("reset")
+            .arg(test.sha)
+            .arg("--hard")
+            .current_dir(&out_dir)
+            .status()
+            .expect("");
 
         if status.success() {
             found = true;
@@ -145,12 +129,8 @@ fn clone_repo(test: &Test, out_dir: &Path) -> PathBuf {
     if !found {
         panic!("unable to find commit {}", test.sha)
     }
-    let status = Command::new("git")
-                     .arg("clean")
-                     .arg("-fdx")
-                     .current_dir(&out_dir)
-                     .status()
-                     .unwrap();
+    let status =
+        Command::new("git").arg("clean").arg("-fdx").current_dir(&out_dir).status().unwrap();
     assert!(status.success());
 
     out_dir

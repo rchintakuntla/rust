@@ -1,14 +1,4 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use spec::{LinkerFlavor, Target, TargetResult};
+use crate::spec::{LinkerFlavor, Target, TargetResult};
 
 pub fn target() -> TargetResult {
     let mut base = super::windows_msvc_base::opts();
@@ -17,12 +7,11 @@ pub fn target() -> TargetResult {
 
     // Mark all dynamic libraries and executables as compatible with the larger 4GiB address
     // space available to x86 Windows binaries on x86_64.
-    base.pre_link_args
-        .get_mut(&LinkerFlavor::Msvc).unwrap().push("/LARGEADDRESSAWARE".to_string());
+    base.pre_link_args.get_mut(&LinkerFlavor::Msvc).unwrap().push("/LARGEADDRESSAWARE".to_string());
 
     // Ensure the linker will only produce an image if it can also produce a table of
     // the image's safe exception handlers.
-    // https://msdn.microsoft.com/en-us/library/9a89h429.aspx
+    // https://docs.microsoft.com/en-us/cpp/build/reference/safeseh-image-has-safe-exception-handlers
     base.pre_link_args.get_mut(&LinkerFlavor::Msvc).unwrap().push("/SAFESEH".to_string());
 
     Ok(Target {

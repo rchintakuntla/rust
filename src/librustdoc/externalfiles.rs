@@ -1,22 +1,12 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
+use crate::html::markdown::{ErrorCodes, IdMap, Markdown, Playground};
+use crate::syntax::edition::Edition;
+use errors;
+use rustc_feature::UnstableFeatures;
 use std::fs;
 use std::path::Path;
 use std::str;
-use errors;
-use syntax::feature_gate::UnstableFeatures;
-use html::markdown::{IdMap, ErrorCodes, Markdown};
-use std::cell::RefCell;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ExternalHtml {
     /// Content that will be included inline in the <head> section of a
     /// rendered Markdown file or generated documentation
@@ -26,41 +16,38 @@ pub struct ExternalHtml {
     pub before_content: String,
     /// Content that will be included inline between the content and </body> of
     /// a rendered Markdown file or generated documentation
-    pub after_content: String
+    pub after_content: String,
 }
 
 impl ExternalHtml {
-    pub fn load(in_header: &[String], before_content: &[String], after_content: &[String],
-                md_before_content: &[String], md_after_content: &[String], diag: &errors::Handler,
-                id_map: &mut IdMap)
-            -> Option<ExternalHtml> {
+    pub fn load(
+        in_header: &[String],
+        before_content: &[String],
+        after_content: &[String],
+        md_before_content: &[String],
+        md_after_content: &[String],
+        diag: &errors::Handler,
+        id_map: &mut IdMap,
+        edition: Edition,
+        playground: &Option<Playground>,
+    ) -> Option<ExternalHtml> {
         let codes = ErrorCodes::from(UnstableFeatures::from_environment().is_nightly_build());
-        load_external_files(in_header, diag)
-            .and_then(|ih|
-                load_external_files(before_content, diag)
-                    .map(|bc| (ih, bc))
-            )
-            .and_then(|(ih, bc)|
-                load_external_files(md_before_content, diag)
-                    .map(|m_bc| (ih,
-                            format!("{}{}", bc, Markdown(&m_bc, &[], RefCell::new(id_map), codes))))
-            )
-            .and_then(|(ih, bc)|
-                load_external_files(after_content, diag)
-                    .map(|ac| (ih, bc, ac))
-            )
-            .and_then(|(ih, bc, ac)|
-                load_external_files(md_after_content, diag)
-                    .map(|m_ac| (ih, bc,
-                            format!("{}{}", ac, Markdown(&m_ac, &[], RefCell::new(id_map), codes))))
-            )
-            .map(|(ih, bc, ac)|
-                ExternalHtml {
-                    in_header: ih,
-                    before_content: bc,
-                    after_content: ac,
-                }
-            )
+        let ih = load_external_files(in_header, diag)?;
+        let bc = load_external_files(before_content, diag)?;
+        let m_bc = load_external_files(md_before_content, diag)?;
+        let bc = format!(
+            "{}{}",
+            bc,
+            Markdown(&m_bc, &[], id_map, codes, edition, playground).to_string()
+        );
+        let ac = load_external_files(after_content, diag)?;
+        let m_ac = load_external_files(md_after_content, diag)?;
+        let ac = format!(
+            "{}{}",
+            ac,
+            Markdown(&m_ac, &[], id_map, codes, edition, playground).to_string()
+        );
+        Some(ExternalHtml { in_header: ih, before_content: bc, after_content: ac })
     }
 }
 
@@ -69,9 +56,10 @@ pub enum LoadStringError {
     BadUtf8,
 }
 
-pub fn load_string<P: AsRef<Path>>(file_path: P, diag: &errors::Handler)
-    -> Result<String, LoadStringError>
-{
+pub fn load_string<P: AsRef<Path>>(
+    file_path: P,
+    diag: &errors::Handler,
+) -> Result<String, LoadStringError> {
     let file_path = file_path.as_ref();
     let contents = match fs::read(file_path) {
         Ok(bytes) => bytes,

@@ -1,50 +1,39 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Algorithm citation:
 //! A Simple, Fast Dominance Algorithm.
 //! Keith D. Cooper, Timothy J. Harvey, and Ken Kennedy
 //! Rice Computer Science TS-06-33870
 //! <https://www.cs.rice.edu/~keith/EMBED/dom.pdf>
 
-use super::super::indexed_vec::{Idx, IndexVec};
 use super::iterate::reverse_post_order;
 use super::ControlFlowGraph;
-
-use std::fmt;
+use rustc_index::vec::{Idx, IndexVec};
+use std::borrow::BorrowMut;
 
 #[cfg(test)]
-mod test;
+mod tests;
 
-pub fn dominators<G: ControlFlowGraph>(graph: &G) -> Dominators<G::Node> {
+pub fn dominators<G: ControlFlowGraph>(graph: G) -> Dominators<G::Node> {
     let start_node = graph.start_node();
-    let rpo = reverse_post_order(graph, start_node);
+    let rpo = reverse_post_order(&graph, start_node);
     dominators_given_rpo(graph, &rpo)
 }
 
-pub fn dominators_given_rpo<G: ControlFlowGraph>(
-    graph: &G,
+fn dominators_given_rpo<G: ControlFlowGraph + BorrowMut<G>>(
+    mut graph: G,
     rpo: &[G::Node],
 ) -> Dominators<G::Node> {
-    let start_node = graph.start_node();
+    let start_node = graph.borrow().start_node();
     assert_eq!(rpo[0], start_node);
 
     // compute the post order index (rank) for each node
     let mut post_order_rank: IndexVec<G::Node, usize> =
-        IndexVec::from_elem_n(usize::default(), graph.num_nodes());
+        (0..graph.borrow().num_nodes()).map(|_| 0).collect();
     for (index, node) in rpo.iter().rev().cloned().enumerate() {
         post_order_rank[node] = index;
     }
 
     let mut immediate_dominators: IndexVec<G::Node, Option<G::Node>> =
-        IndexVec::from_elem_n(Option::default(), graph.num_nodes());
+        (0..graph.borrow().num_nodes()).map(|_| None).collect();
     immediate_dominators[start_node] = Some(start_node);
 
     let mut changed = true;
@@ -53,16 +42,14 @@ pub fn dominators_given_rpo<G: ControlFlowGraph>(
 
         for &node in &rpo[1..] {
             let mut new_idom = None;
-            for pred in graph.predecessors(node) {
+            for pred in graph.borrow_mut().predecessors(node) {
                 if immediate_dominators[pred].is_some() {
-                    // (*)
                     // (*) dominators for `pred` have been calculated
-                    new_idom = intersect_opt(
-                        &post_order_rank,
-                        &immediate_dominators,
-                        new_idom,
-                        Some(pred),
-                    );
+                    new_idom = Some(if let Some(new_idom) = new_idom {
+                        intersect(&post_order_rank, &immediate_dominators, new_idom, pred)
+                    } else {
+                        pred
+                    });
                 }
             }
 
@@ -73,23 +60,7 @@ pub fn dominators_given_rpo<G: ControlFlowGraph>(
         }
     }
 
-    Dominators {
-        post_order_rank,
-        immediate_dominators,
-    }
-}
-
-fn intersect_opt<Node: Idx>(
-    post_order_rank: &IndexVec<Node, usize>,
-    immediate_dominators: &IndexVec<Node, Option<Node>>,
-    node1: Option<Node>,
-    node2: Option<Node>,
-) -> Option<Node> {
-    match (node1, node2) {
-        (None, None) => None,
-        (Some(n), None) | (None, Some(n)) => Some(n),
-        (Some(n1), Some(n2)) => Some(intersect(post_order_rank, immediate_dominators, n1, n2)),
-    }
+    Dominators { post_order_rank, immediate_dominators }
 }
 
 fn intersect<Node: Idx>(
@@ -107,7 +78,8 @@ fn intersect<Node: Idx>(
             node2 = immediate_dominators[node2].unwrap();
         }
     }
-    return node1;
+
+    node1
 }
 
 #[derive(Clone, Debug)]
@@ -126,26 +98,18 @@ impl<Node: Idx> Dominators<Node> {
         self.immediate_dominators[node].unwrap()
     }
 
-    pub fn dominators(&self, node: Node) -> Iter<Node> {
+    pub fn dominators(&self, node: Node) -> Iter<'_, Node> {
         assert!(self.is_reachable(node), "node {:?} is not reachable", node);
-        Iter {
-            dominators: self,
-            node: Some(node),
-        }
+        Iter { dominators: self, node: Some(node) }
     }
 
     pub fn is_dominated_by(&self, node: Node, dom: Node) -> bool {
         // FIXME -- could be optimized by using post-order-rank
         self.dominators(node).any(|n| n == dom)
     }
-
-    #[cfg(test)]
-    fn all_immediate_dominators(&self) -> &IndexVec<Node, Option<Node>> {
-        &self.immediate_dominators
-    }
 }
 
-pub struct Iter<'dom, Node: Idx + 'dom> {
+pub struct Iter<'dom, Node: Idx> {
     dominators: &'dom Dominators<Node>,
     node: Option<Node>,
 }
@@ -165,50 +129,5 @@ impl<'dom, Node: Idx> Iterator for Iter<'dom, Node> {
         } else {
             return None;
         }
-    }
-}
-
-pub struct DominatorTree<N: Idx> {
-    root: N,
-    children: IndexVec<N, Vec<N>>,
-}
-
-impl<Node: Idx> DominatorTree<Node> {
-    pub fn children(&self, node: Node) -> &[Node] {
-        &self.children[node]
-    }
-}
-
-impl<Node: Idx> fmt::Debug for DominatorTree<Node> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        fmt::Debug::fmt(
-            &DominatorTreeNode {
-                tree: self,
-                node: self.root,
-            },
-            fmt,
-        )
-    }
-}
-
-struct DominatorTreeNode<'tree, Node: Idx> {
-    tree: &'tree DominatorTree<Node>,
-    node: Node,
-}
-
-impl<'tree, Node: Idx> fmt::Debug for DominatorTreeNode<'tree, Node> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
-        let subtrees: Vec<_> = self.tree
-            .children(self.node)
-            .iter()
-            .map(|&child| DominatorTreeNode {
-                tree: self.tree,
-                node: child,
-            })
-            .collect();
-        fmt.debug_tuple("")
-            .field(&self.node)
-            .field(&subtrees)
-            .finish()
     }
 }

@@ -1,13 +1,3 @@
-// Copyright 2013-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use core::char::from_u32;
 
 #[test]
@@ -32,10 +22,12 @@ fn test_to_ascii_uppercase() {
     assert_eq!("hıKß".to_ascii_uppercase(), "HıKß");
 
     for i in 0..501 {
-        let upper = if 'a' as u32 <= i && i <= 'z' as u32 { i + 'A' as u32 - 'a' as u32 }
-                    else { i };
-        assert_eq!((from_u32(i).unwrap()).to_string().to_ascii_uppercase(),
-                   (from_u32(upper).unwrap()).to_string());
+        let upper =
+            if 'a' as u32 <= i && i <= 'z' as u32 { i + 'A' as u32 - 'a' as u32 } else { i };
+        assert_eq!(
+            (from_u32(i).unwrap()).to_string().to_ascii_uppercase(),
+            (from_u32(upper).unwrap()).to_string()
+        );
     }
 }
 
@@ -46,23 +38,23 @@ fn test_to_ascii_lowercase() {
     assert_eq!("HİKß".to_ascii_lowercase(), "hİKß");
 
     for i in 0..501 {
-        let lower = if 'A' as u32 <= i && i <= 'Z' as u32 { i + 'a' as u32 - 'A' as u32 }
-                    else { i };
-        assert_eq!((from_u32(i).unwrap()).to_string().to_ascii_lowercase(),
-                   (from_u32(lower).unwrap()).to_string());
+        let lower =
+            if 'A' as u32 <= i && i <= 'Z' as u32 { i + 'a' as u32 - 'A' as u32 } else { i };
+        assert_eq!(
+            (from_u32(i).unwrap()).to_string().to_ascii_lowercase(),
+            (from_u32(lower).unwrap()).to_string()
+        );
     }
 }
 
 #[test]
 fn test_make_ascii_lower_case() {
     macro_rules! test {
-        ($from: expr, $to: expr) => {
-            {
-                let mut x = $from;
-                x.make_ascii_lowercase();
-                assert_eq!(x, $to);
-            }
-        }
+        ($from: expr, $to: expr) => {{
+            let mut x = $from;
+            x.make_ascii_lowercase();
+            assert_eq!(x, $to);
+        }};
     }
     test!(b'A', b'a');
     test!(b'a', b'a');
@@ -75,17 +67,14 @@ fn test_make_ascii_lower_case() {
     test!("HİKß".to_string(), "hİKß");
 }
 
-
 #[test]
 fn test_make_ascii_upper_case() {
     macro_rules! test {
-        ($from: expr, $to: expr) => {
-            {
-                let mut x = $from;
-                x.make_ascii_uppercase();
-                assert_eq!(x, $to);
-            }
-        }
+        ($from: expr, $to: expr) => {{
+            let mut x = $from;
+            x.make_ascii_uppercase();
+            assert_eq!(x, $to);
+        }};
     }
     test!(b'a', b'A');
     test!(b'A', b'A');
@@ -98,7 +87,7 @@ fn test_make_ascii_upper_case() {
     test!("hıKß".to_string(), "HıKß");
 
     let mut x = "Hello".to_string();
-    x[..3].make_ascii_uppercase();  // Test IndexMut on String.
+    x[..3].make_ascii_uppercase(); // Test IndexMut on String.
     assert_eq!(x, "HELlo")
 }
 
@@ -113,10 +102,13 @@ fn test_eq_ignore_ascii_case() {
     assert!(!"ß".eq_ignore_ascii_case("s"));
 
     for i in 0..501 {
-        let lower = if 'A' as u32 <= i && i <= 'Z' as u32 { i + 'a' as u32 - 'A' as u32 }
-                    else { i };
-        assert!((from_u32(i).unwrap()).to_string().eq_ignore_ascii_case(
-                &from_u32(lower).unwrap().to_string()));
+        let lower =
+            if 'A' as u32 <= i && i <= 'Z' as u32 { i + 'a' as u32 - 'A' as u32 } else { i };
+        assert!(
+            (from_u32(i).unwrap())
+                .to_string()
+                .eq_ignore_ascii_case(&from_u32(lower).unwrap().to_string())
+        );
     }
 }
 
@@ -161,19 +153,21 @@ macro_rules! assert_none {
                            stringify!($what), b);
                 }
             }
-        )*
+        )+
     }};
     ($what:ident, $($str:tt),+,) => (assert_none!($what,$($str),+))
 }
 
 #[test]
 fn test_is_ascii_alphabetic() {
-    assert_all!(is_ascii_alphabetic,
+    assert_all!(
+        is_ascii_alphabetic,
         "",
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
     );
-    assert_none!(is_ascii_alphabetic,
+    assert_none!(
+        is_ascii_alphabetic,
         "0123456789",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
         " \t\n\x0c\r",
@@ -187,11 +181,9 @@ fn test_is_ascii_alphabetic() {
 
 #[test]
 fn test_is_ascii_uppercase() {
-    assert_all!(is_ascii_uppercase,
-        "",
-        "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
-    );
-    assert_none!(is_ascii_uppercase,
+    assert_all!(is_ascii_uppercase, "", "ABCDEFGHIJKLMNOQPRSTUVWXYZ",);
+    assert_none!(
+        is_ascii_uppercase,
         "abcdefghijklmnopqrstuvwxyz",
         "0123456789",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
@@ -206,10 +198,9 @@ fn test_is_ascii_uppercase() {
 
 #[test]
 fn test_is_ascii_lowercase() {
-    assert_all!(is_ascii_lowercase,
-        "abcdefghijklmnopqrstuvwxyz",
-    );
-    assert_none!(is_ascii_lowercase,
+    assert_all!(is_ascii_lowercase, "abcdefghijklmnopqrstuvwxyz",);
+    assert_none!(
+        is_ascii_lowercase,
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "0123456789",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
@@ -224,13 +215,15 @@ fn test_is_ascii_lowercase() {
 
 #[test]
 fn test_is_ascii_alphanumeric() {
-    assert_all!(is_ascii_alphanumeric,
+    assert_all!(
+        is_ascii_alphanumeric,
         "",
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "0123456789",
     );
-    assert_none!(is_ascii_alphanumeric,
+    assert_none!(
+        is_ascii_alphanumeric,
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
         " \t\n\x0c\r",
         "\x00\x01\x02\x03\x04\x05\x06\x07",
@@ -243,11 +236,9 @@ fn test_is_ascii_alphanumeric() {
 
 #[test]
 fn test_is_ascii_digit() {
-    assert_all!(is_ascii_digit,
-        "",
-        "0123456789",
-    );
-    assert_none!(is_ascii_digit,
+    assert_all!(is_ascii_digit, "", "0123456789",);
+    assert_none!(
+        is_ascii_digit,
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
@@ -262,12 +253,9 @@ fn test_is_ascii_digit() {
 
 #[test]
 fn test_is_ascii_hexdigit() {
-    assert_all!(is_ascii_hexdigit,
-        "",
-        "0123456789",
-        "abcdefABCDEF",
-    );
-    assert_none!(is_ascii_hexdigit,
+    assert_all!(is_ascii_hexdigit, "", "0123456789", "abcdefABCDEF",);
+    assert_none!(
+        is_ascii_hexdigit,
         "ghijklmnopqrstuvwxyz",
         "GHIJKLMNOQPRSTUVWXYZ",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
@@ -282,11 +270,9 @@ fn test_is_ascii_hexdigit() {
 
 #[test]
 fn test_is_ascii_punctuation() {
-    assert_all!(is_ascii_punctuation,
-        "",
-        "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
-    );
-    assert_none!(is_ascii_punctuation,
+    assert_all!(is_ascii_punctuation, "", "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",);
+    assert_none!(
+        is_ascii_punctuation,
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "0123456789",
@@ -301,14 +287,16 @@ fn test_is_ascii_punctuation() {
 
 #[test]
 fn test_is_ascii_graphic() {
-    assert_all!(is_ascii_graphic,
+    assert_all!(
+        is_ascii_graphic,
         "",
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "0123456789",
         "!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~",
     );
-    assert_none!(is_ascii_graphic,
+    assert_none!(
+        is_ascii_graphic,
         " \t\n\x0c\r",
         "\x00\x01\x02\x03\x04\x05\x06\x07",
         "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
@@ -320,11 +308,9 @@ fn test_is_ascii_graphic() {
 
 #[test]
 fn test_is_ascii_whitespace() {
-    assert_all!(is_ascii_whitespace,
-        "",
-        " \t\n\x0c\r",
-    );
-    assert_none!(is_ascii_whitespace,
+    assert_all!(is_ascii_whitespace, "", " \t\n\x0c\r",);
+    assert_none!(
+        is_ascii_whitespace,
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "0123456789",
@@ -339,7 +325,8 @@ fn test_is_ascii_whitespace() {
 
 #[test]
 fn test_is_ascii_control() {
-    assert_all!(is_ascii_control,
+    assert_all!(
+        is_ascii_control,
         "",
         "\x00\x01\x02\x03\x04\x05\x06\x07",
         "\x08\x09\x0a\x0b\x0c\x0d\x0e\x0f",
@@ -347,7 +334,8 @@ fn test_is_ascii_control() {
         "\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f",
         "\x7f",
     );
-    assert_none!(is_ascii_control,
+    assert_none!(
+        is_ascii_control,
         "abcdefghijklmnopqrstuvwxyz",
         "ABCDEFGHIJKLMNOQPRSTUVWXYZ",
         "0123456789",

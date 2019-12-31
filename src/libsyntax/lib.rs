@@ -1,69 +1,27 @@
-// Copyright 2012-2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! The Rust parser and macro expander.
 //!
 //! # Note
 //!
 //! This API is completely unstable and subject to change.
 
-#![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
-       html_favicon_url = "https://doc.rust-lang.org/favicon.ico",
-       html_root_url = "https://doc.rust-lang.org/nightly/",
-       test(attr(deny(warnings))))]
-
+#![doc(html_root_url = "https://doc.rust-lang.org/nightly/", test(attr(deny(warnings))))]
+#![feature(bool_to_option)]
+#![feature(box_syntax)]
+#![feature(const_fn)]
+#![feature(const_transmute)]
 #![feature(crate_visibility_modifier)]
-#![feature(macro_at_most_once_rep)]
-#![feature(rustc_attrs)]
-#![feature(rustc_diagnostic_macros)]
-#![feature(slice_sort_by_cached_key)]
-#![feature(str_escape)]
+#![feature(label_break_value)]
+#![feature(nll)]
+#![feature(try_trait)]
+#![feature(slice_patterns)]
 #![feature(unicode_internals)]
+#![recursion_limit = "256"]
 
-#![recursion_limit="256"]
-
-#[macro_use] extern crate bitflags;
-extern crate core;
-extern crate serialize;
-#[macro_use] extern crate log;
-pub extern crate rustc_errors as errors;
-extern crate syntax_pos;
-extern crate rustc_data_structures;
-extern crate rustc_target;
-#[macro_use] extern crate scoped_tls;
-
-extern crate serialize as rustc_serialize; // used by deriving
-
-use rustc_data_structures::sync::Lock;
-use rustc_data_structures::bitvec::BitVector;
 use ast::AttrId;
-
-// A variant of 'try!' that panics on an Err. This is used as a crutch on the
-// way towards a non-panic!-prone parser. It should be used for fatal parsing
-// errors; eventually we plan to convert all code using panictry to just use
-// normal try.
-// Exported for syntax_ext, not meant for general use.
-#[macro_export]
-macro_rules! panictry {
-    ($e:expr) => ({
-        use std::result::Result::{Ok, Err};
-        use errors::FatalError;
-        match $e {
-            Ok(e) => e,
-            Err(mut e) => {
-                e.emit();
-                FatalError.raise()
-            }
-        }
-    })
-}
+pub use errors;
+use rustc_data_structures::sync::Lock;
+use rustc_index::bit_set::GrowableBitSet;
+use syntax_pos::edition::Edition;
 
 #[macro_export]
 macro_rules! unwrap_or {
@@ -72,119 +30,88 @@ macro_rules! unwrap_or {
             Some(x) => x,
             None => $default,
         }
-    }
+    };
 }
 
 pub struct Globals {
-    used_attrs: Lock<BitVector<AttrId>>,
-    known_attrs: Lock<BitVector<AttrId>>,
+    used_attrs: Lock<GrowableBitSet<AttrId>>,
+    known_attrs: Lock<GrowableBitSet<AttrId>>,
     syntax_pos_globals: syntax_pos::Globals,
 }
 
 impl Globals {
-    fn new() -> Globals {
+    fn new(edition: Edition) -> Globals {
         Globals {
-            // We have no idea how many attributes their will be, so just
+            // We have no idea how many attributes there will be, so just
             // initiate the vectors with 0 bits. We'll grow them as necessary.
-            used_attrs: Lock::new(BitVector::new()),
-            known_attrs: Lock::new(BitVector::new()),
-            syntax_pos_globals: syntax_pos::Globals::new(),
+            used_attrs: Lock::new(GrowableBitSet::new_empty()),
+            known_attrs: Lock::new(GrowableBitSet::new_empty()),
+            syntax_pos_globals: syntax_pos::Globals::new(edition),
         }
     }
 }
 
-pub fn with_globals<F, R>(f: F) -> R
-    where F: FnOnce() -> R
+pub fn with_globals<F, R>(edition: Edition, f: F) -> R
+where
+    F: FnOnce() -> R,
 {
-    let globals = Globals::new();
-    GLOBALS.set(&globals, || {
-        syntax_pos::GLOBALS.set(&globals.syntax_pos_globals, f)
-    })
+    let globals = Globals::new(edition);
+    GLOBALS.set(&globals, || syntax_pos::GLOBALS.set(&globals.syntax_pos_globals, f))
 }
 
-scoped_thread_local!(pub static GLOBALS: Globals);
+pub fn with_default_globals<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    with_globals(edition::DEFAULT_EDITION, f)
+}
+
+scoped_tls::scoped_thread_local!(pub static GLOBALS: Globals);
 
 #[macro_use]
 pub mod diagnostics {
     #[macro_use]
     pub mod macros;
-    pub mod plugin;
-    pub mod metadata;
 }
-
-// NB: This module needs to be declared first so diagnostics are
-// registered before they are used.
-pub mod diagnostic_list;
 
 pub mod util {
+    pub mod classify;
+    pub mod comments;
     pub mod lev_distance;
+    pub mod literal;
+    pub mod map_in_place;
     pub mod node_count;
     pub mod parser;
-    #[cfg(test)]
-    pub mod parser_testing;
-    pub mod small_vector;
-    pub mod move_map;
-
-    mod thin_vec;
-    pub use self::thin_vec::ThinVec;
-
-    mod rc_slice;
-    pub use self::rc_slice::RcSlice;
-}
-
-pub mod json;
-
-pub mod syntax {
-    pub use ext;
-    pub use parse;
-    pub use ast;
 }
 
 pub mod ast;
 pub mod attr;
-pub mod codemap;
-#[macro_use]
-pub mod config;
+pub mod expand;
+pub use syntax_pos::source_map;
 pub mod entry;
-pub mod feature_gate;
-pub mod fold;
-pub mod parse;
+pub mod feature_gate {
+    mod check;
+    pub use check::{check_attribute, check_crate, feature_err, feature_err_issue, get_features};
+}
+pub mod mut_visit;
 pub mod ptr;
 pub mod show_span;
-pub mod std_inject;
-pub mod str;
+pub use rustc_session::parse as sess;
 pub use syntax_pos::edition;
 pub use syntax_pos::symbol;
-pub mod test;
+pub mod token;
 pub mod tokenstream;
 pub mod visit;
 
 pub mod print {
+    mod helpers;
     pub mod pp;
     pub mod pprust;
 }
 
-pub mod ext {
-    pub use syntax_pos::hygiene;
-    pub mod base;
-    pub mod build;
-    pub mod derive;
-    pub mod expand;
-    pub mod placeholders;
-    pub mod quote;
-    pub mod source_util;
-
-    pub mod tt {
-        pub mod transcribe;
-        pub mod macro_parser;
-        pub mod macro_rules;
-        pub mod quoted;
-    }
-}
-
 pub mod early_buffered_lints;
 
-#[cfg(test)]
-mod test_snippet;
-
-__build_diagnostic_array! { libsyntax, DIAGNOSTICS }
+/// Requirements for a `StableHashingContext` to be used in this crate.
+/// This is a hack to allow using the `HashStable_Generic` derive macro
+/// instead of implementing everything in librustc.
+pub trait HashStableContext: syntax_pos::HashStableContext {}

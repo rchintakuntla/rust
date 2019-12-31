@@ -1,13 +1,3 @@
-# Copyright 2015-2016 The Rust Project Developers. See the COPYRIGHT
-# file at the top-level directory of this distribution and at
-# http://rust-lang.org/COPYRIGHT.
-#
-# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-# http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-# <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-# option. This file may not be copied, modified, or distributed
-# except according to those terms.
-
 """Bootstrap tests"""
 
 from __future__ import absolute_import, division, print_function
@@ -30,14 +20,14 @@ class Stage0DataTestCase(unittest.TestCase):
         os.mkdir(os.path.join(self.rust_root, "src"))
         with open(os.path.join(self.rust_root, "src",
                                "stage0.txt"), "w") as stage0:
-            stage0.write("#ignore\n\ndate: 2017-06-15\nrustc: beta\ncargo: beta")
+            stage0.write("#ignore\n\ndate: 2017-06-15\nrustc: beta\ncargo: beta\nrustfmt: beta")
 
     def tearDown(self):
         rmtree(self.rust_root)
 
     def test_stage0_data(self):
         """Extract data from stage0.txt"""
-        expected = {"date": "2017-06-15", "rustc": "beta", "cargo": "beta"}
+        expected = {"date": "2017-06-15", "rustc": "beta", "cargo": "beta", "rustfmt": "beta"}
         data = bootstrap.stage0_data(self.rust_root)
         self.assertDictEqual(data, expected)
 

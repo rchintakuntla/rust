@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Collection types.
 
 #![stable(feature = "rust1", since = "1.0.0")]
@@ -33,50 +23,57 @@ pub mod btree_set {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(no_inline)]
-pub use self::binary_heap::BinaryHeap;
+pub use binary_heap::BinaryHeap;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(no_inline)]
-pub use self::btree_map::BTreeMap;
+pub use btree_map::BTreeMap;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(no_inline)]
-pub use self::btree_set::BTreeSet;
+pub use btree_set::BTreeSet;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(no_inline)]
-pub use self::linked_list::LinkedList;
+pub use linked_list::LinkedList;
 
 #[stable(feature = "rust1", since = "1.0.0")]
 #[doc(no_inline)]
-pub use self::vec_deque::VecDeque;
+pub use vec_deque::VecDeque;
 
-use alloc::{AllocErr, LayoutErr};
+use crate::alloc::{Layout, LayoutErr};
 
-/// Augments `AllocErr` with a CapacityOverflow variant.
+/// The error type for `try_reserve` methods.
 #[derive(Clone, PartialEq, Eq, Debug)]
-#[unstable(feature = "try_reserve", reason = "new API", issue="48043")]
-pub enum CollectionAllocErr {
+#[unstable(feature = "try_reserve", reason = "new API", issue = "48043")]
+pub enum TryReserveError {
     /// Error due to the computed capacity exceeding the collection's maximum
     /// (usually `isize::MAX` bytes).
     CapacityOverflow,
-    /// Error due to the allocator (see the `AllocErr` type's docs).
-    AllocErr,
+
+    /// The memory allocator returned an error
+    AllocError {
+        /// The layout of allocation request that failed
+        layout: Layout,
+
+        #[doc(hidden)]
+        #[unstable(
+            feature = "container_error_extra",
+            issue = "none",
+            reason = "\
+            Enable exposing the allocator’s custom error value \
+            if an associated type is added in the future: \
+            https://github.com/rust-lang/wg-allocators/issues/23"
+        )]
+        non_exhaustive: (),
+    },
 }
 
-#[unstable(feature = "try_reserve", reason = "new API", issue="48043")]
-impl From<AllocErr> for CollectionAllocErr {
-    #[inline]
-    fn from(AllocErr: AllocErr) -> Self {
-        CollectionAllocErr::AllocErr
-    }
-}
-
-#[unstable(feature = "try_reserve", reason = "new API", issue="48043")]
-impl From<LayoutErr> for CollectionAllocErr {
+#[unstable(feature = "try_reserve", reason = "new API", issue = "48043")]
+impl From<LayoutErr> for TryReserveError {
     #[inline]
     fn from(_: LayoutErr) -> Self {
-        CollectionAllocErr::CapacityOverflow
+        TryReserveError::CapacityOverflow
     }
 }
 

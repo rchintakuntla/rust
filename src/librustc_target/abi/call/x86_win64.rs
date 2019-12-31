@@ -1,32 +1,19 @@
-// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+use crate::abi::call::{ArgAbi, FnAbi, Reg};
+use crate::abi::Abi;
 
-use abi::call::{ArgType, FnType, Reg};
-use abi::Abi;
+// Win64 ABI: https://docs.microsoft.com/en-us/cpp/build/parameter-passing
 
-// Win64 ABI: http://msdn.microsoft.com/en-us/library/zthk2dkh.aspx
-
-pub fn compute_abi_info<Ty>(fty: &mut FnType<Ty>) {
-    let fixup = |a: &mut ArgType<Ty>| {
+pub fn compute_abi_info<Ty>(fn_abi: &mut FnAbi<'_, Ty>) {
+    let fixup = |a: &mut ArgAbi<'_, Ty>| {
         match a.layout.abi {
             Abi::Uninhabited => {}
-            Abi::ScalarPair(..) |
-            Abi::Aggregate { .. } => {
-                match a.layout.size.bits() {
-                    8 => a.cast_to(Reg::i8()),
-                    16 => a.cast_to(Reg::i16()),
-                    32 => a.cast_to(Reg::i32()),
-                    64 => a.cast_to(Reg::i64()),
-                    _ => a.make_indirect()
-                }
-            }
+            Abi::ScalarPair(..) | Abi::Aggregate { .. } => match a.layout.size.bits() {
+                8 => a.cast_to(Reg::i8()),
+                16 => a.cast_to(Reg::i16()),
+                32 => a.cast_to(Reg::i32()),
+                64 => a.cast_to(Reg::i64()),
+                _ => a.make_indirect(),
+            },
             Abi::Vector { .. } => {
                 // FIXME(eddyb) there should be a size cap here
                 // (probably what clang calls "illegal vectors").
@@ -41,11 +28,13 @@ pub fn compute_abi_info<Ty>(fty: &mut FnType<Ty>) {
         }
     };
 
-    if !fty.ret.is_ignore() {
-        fixup(&mut fty.ret);
+    if !fn_abi.ret.is_ignore() {
+        fixup(&mut fn_abi.ret);
     }
-    for arg in &mut fty.args {
-        if arg.is_ignore() { continue; }
+    for arg in &mut fn_abi.args {
+        if arg.is_ignore() {
+            continue;
+        }
         fixup(arg);
     }
 }

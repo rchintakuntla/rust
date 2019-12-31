@@ -1,39 +1,33 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+#![stable(feature = "futures_api", since = "1.36.0")]
 
-#![unstable(feature = "futures_api",
-            reason = "futures in libcore are unstable",
-            issue = "50547")]
-
-use ops::Try;
-use result::Result;
+use crate::ops::Try;
+use crate::result::Result;
 
 /// Indicates whether a value is available or if the current task has been
 /// scheduled to receive a wakeup instead.
+#[must_use = "this `Poll` may be a `Pending` variant, which should be handled"]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[stable(feature = "futures_api", since = "1.36.0")]
 pub enum Poll<T> {
     /// Represents that a value is immediately ready.
-    Ready(T),
+    #[stable(feature = "futures_api", since = "1.36.0")]
+    Ready(#[stable(feature = "futures_api", since = "1.36.0")] T),
 
     /// Represents that a value is not ready yet.
     ///
     /// When a function returns `Pending`, the function *must* also
     /// ensure that the current task is scheduled to be awoken when
     /// progress can be made.
+    #[stable(feature = "futures_api", since = "1.36.0")]
     Pending,
 }
 
 impl<T> Poll<T> {
-    /// Change the ready value of this `Poll` with the closure provided
+    /// Changes the ready value of this `Poll` with the closure provided.
+    #[stable(feature = "futures_api", since = "1.36.0")]
     pub fn map<U, F>(self, f: F) -> Poll<U>
-        where F: FnOnce(T) -> U
+    where
+        F: FnOnce(T) -> U,
     {
         match self {
             Poll::Ready(t) => Poll::Ready(f(t)),
@@ -41,8 +35,9 @@ impl<T> Poll<T> {
         }
     }
 
-    /// Returns whether this is `Poll::Ready`
+    /// Returns `true` if this is `Poll::Ready`
     #[inline]
+    #[stable(feature = "futures_api", since = "1.36.0")]
     pub fn is_ready(&self) -> bool {
         match *self {
             Poll::Ready(_) => true,
@@ -50,17 +45,20 @@ impl<T> Poll<T> {
         }
     }
 
-    /// Returns whether this is `Poll::Pending`
+    /// Returns `true` if this is `Poll::Pending`
     #[inline]
+    #[stable(feature = "futures_api", since = "1.36.0")]
     pub fn is_pending(&self) -> bool {
         !self.is_ready()
     }
 }
 
 impl<T, E> Poll<Result<T, E>> {
-    /// Change the success value of this `Poll` with the closure provided
+    /// Changes the success value of this `Poll` with the closure provided.
+    #[stable(feature = "futures_api", since = "1.36.0")]
     pub fn map_ok<U, F>(self, f: F) -> Poll<Result<U, E>>
-        where F: FnOnce(T) -> U
+    where
+        F: FnOnce(T) -> U,
     {
         match self {
             Poll::Ready(Ok(t)) => Poll::Ready(Ok(f(t))),
@@ -69,9 +67,11 @@ impl<T, E> Poll<Result<T, E>> {
         }
     }
 
-    /// Change the error value of this `Poll` with the closure provided
+    /// Changes the error value of this `Poll` with the closure provided.
+    #[stable(feature = "futures_api", since = "1.36.0")]
     pub fn map_err<U, F>(self, f: F) -> Poll<Result<T, U>>
-        where F: FnOnce(E) -> U
+    where
+        F: FnOnce(E) -> U,
     {
         match self {
             Poll::Ready(Ok(t)) => Poll::Ready(Ok(t)),
@@ -81,12 +81,44 @@ impl<T, E> Poll<Result<T, E>> {
     }
 }
 
+impl<T, E> Poll<Option<Result<T, E>>> {
+    /// Changes the success value of this `Poll` with the closure provided.
+    #[unstable(feature = "poll_map", issue = "63514")]
+    pub fn map_ok<U, F>(self, f: F) -> Poll<Option<Result<U, E>>>
+    where
+        F: FnOnce(T) -> U,
+    {
+        match self {
+            Poll::Ready(Some(Ok(t))) => Poll::Ready(Some(Ok(f(t)))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+
+    /// Changes the error value of this `Poll` with the closure provided.
+    #[unstable(feature = "poll_map", issue = "63514")]
+    pub fn map_err<U, F>(self, f: F) -> Poll<Option<Result<T, U>>>
+    where
+        F: FnOnce(E) -> U,
+    {
+        match self {
+            Poll::Ready(Some(Ok(t))) => Poll::Ready(Some(Ok(t))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(f(e)))),
+            Poll::Ready(None) => Poll::Ready(None),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+#[stable(feature = "futures_api", since = "1.36.0")]
 impl<T> From<T> for Poll<T> {
     fn from(t: T) -> Poll<T> {
         Poll::Ready(t)
     }
 }
 
+#[stable(feature = "futures_api", since = "1.36.0")]
 impl<T, E> Try for Poll<Result<T, E>> {
     type Ok = Poll<T>;
     type Error = E;
@@ -111,6 +143,7 @@ impl<T, E> Try for Poll<Result<T, E>> {
     }
 }
 
+#[stable(feature = "futures_api", since = "1.36.0")]
 impl<T, E> Try for Poll<Option<Result<T, E>>> {
     type Ok = Poll<Option<T>>;
     type Error = E;

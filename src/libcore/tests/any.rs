@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use core::any::*;
 
 #[derive(PartialEq, Debug)]
@@ -34,11 +24,8 @@ fn any_referenced() {
 
 #[test]
 fn any_owning() {
-    let (a, b, c) = (
-        box 5_usize as Box<dyn Any>,
-        box TEST as Box<dyn Any>,
-        box Test as Box<dyn Any>,
-    );
+    let (a, b, c) =
+        (box 5_usize as Box<dyn Any>, box TEST as Box<dyn Any>, box Test as Box<dyn Any>);
 
     assert!(a.is::<usize>());
     assert!(!b.is::<usize>());
@@ -59,12 +46,12 @@ fn any_downcast_ref() {
 
     match a.downcast_ref::<usize>() {
         Some(&5) => {}
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 
     match a.downcast_ref::<Test>() {
         None => {}
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 }
 
@@ -82,7 +69,7 @@ fn any_downcast_mut() {
             assert_eq!(*x, 5);
             *x = 612;
         }
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 
     match b_r.downcast_mut::<usize>() {
@@ -90,27 +77,27 @@ fn any_downcast_mut() {
             assert_eq!(*x, 7);
             *x = 413;
         }
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 
     match a_r.downcast_mut::<Test>() {
         None => (),
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 
     match b_r.downcast_mut::<Test>() {
         None => (),
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 
     match a_r.downcast_mut::<usize>() {
         Some(&mut 612) => {}
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 
     match b_r.downcast_mut::<usize>() {
         Some(&mut 413) => {}
-        x => panic!("Unexpected value {:?}", x)
+        x => panic!("Unexpected value {:?}", x),
     }
 }
 

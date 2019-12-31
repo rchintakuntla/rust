@@ -1,13 +1,3 @@
-// Copyright 2014-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use core::mem::*;
 
 #[test]
@@ -106,7 +96,9 @@ fn test_transmute_copy() {
 
 #[test]
 fn test_transmute() {
-    trait Foo { fn dummy(&self) { } }
+    trait Foo {
+        fn dummy(&self) {}
+    }
     impl Foo for isize {}
 
     let a = box 100isize as Box<dyn Foo>;
@@ -126,13 +118,13 @@ fn test_transmute() {
 fn test_discriminant_send_sync() {
     enum Regular {
         A,
-        B(i32)
+        B(i32),
     }
     enum NotSendSync {
-        A(*const i32)
+        A(*const i32),
     }
 
-    fn is_send_sync<T: Send + Sync>() { }
+    fn is_send_sync<T: Send + Sync>() {}
 
     is_send_sync::<Discriminant<Regular>>();
     is_send_sync::<Discriminant<NotSendSync>>();

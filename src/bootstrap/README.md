@@ -8,14 +8,14 @@ system.
 
 The rustbuild build system has a primary entry point, a top level `x.py` script:
 
-```
-python ./x.py build
+```sh
+$ python ./x.py build
 ```
 
 Note that if you're on Unix you should be able to execute the script directly:
 
-```
-./x.py build
+```sh
+$ ./x.py build
 ```
 
 The script accepts commands, flags, and arguments to determine what to do:
@@ -55,11 +55,11 @@ The script accepts commands, flags, and arguments to determine what to do:
   # run all unit tests
   ./x.py test
 
-  # execute the run-pass test suite
-  ./x.py test src/test/run-pass
+  # execute the UI test suite
+  ./x.py test src/test/ui
 
-  # execute only some tests in the run-pass test suite
-  ./x.py test src/test/run-pass --test-args substring-of-test-name
+  # execute only some tests in the UI test suite
+  ./x.py test src/test/ui --test-args substring-of-test-name
 
   # execute tests in the standard library in stage0
   ./x.py test --stage 0 src/libstd
@@ -129,18 +129,18 @@ To follow this course of action, first thing you will want to do is to
 install a nightly, presumably using `rustup`. You will then want to
 configure your directory to use this build, like so:
 
-```
+```sh
 # configure to use local rust instead of downloading a beta.
 # `--local-rust-root` is optional here. If elided, we will
 # use whatever rustc we find on your PATH.
-> ./configure --local-rust-root=~/.cargo/ --enable-local-rebuild
+$ ./configure --local-rust-root=~/.cargo/ --enable-local-rebuild
 ```
 
 After that, you can use the `--incremental` flag to actually do
 incremental builds:
 
-```
-> ./x.py build --incremental
+```sh
+$ ./x.py build --incremental
 ```
 
 The `--incremental` flag will store incremental compilation artifacts
@@ -159,7 +159,7 @@ will still be using the local nightly as your bootstrap).
 This build system houses all output under the `build` directory, which looks
 like this:
 
-```
+```sh
 # Root folder of all output. Everything is scoped underneath here
 build/
 
@@ -215,7 +215,7 @@ build/
 
     # Output for all compiletest-based test suites
     test/
-      run-pass/
+      ui/
       compile-fail/
       debuginfo/
       ...
@@ -328,6 +328,8 @@ are:
   `Config` struct.
 * Adding a sanity check? Take a look at `bootstrap/sanity.rs`.
 
-If you have any questions feel free to reach out on `#rust-infra` on IRC or ask on
-internals.rust-lang.org. When you encounter bugs, please file issues on the
-rust-lang/rust issue tracker.
+If you have any questions feel free to reach out on `#infra` channel in the
+[Rust Discord server][rust-discord] or ask on internals.rust-lang.org. When
+you encounter bugs, please file issues on the rust-lang/rust issue tracker.
+
+[rust-discord]: https://discord.gg/rust-lang

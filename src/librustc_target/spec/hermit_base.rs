@@ -1,37 +1,25 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use spec::{LinkArgs, LinkerFlavor, PanicStrategy, TargetOptions};
+use crate::spec::{LinkArgs, LinkerFlavor, LldFlavor, PanicStrategy, TargetOptions};
 use std::default::Default;
 
 pub fn opts() -> TargetOptions {
-    let mut args = LinkArgs::new();
-    args.insert(LinkerFlavor::Gcc, vec![
-        "-Wl,-Bstatic".to_string(),
-        "-Wl,--no-dynamic-linker".to_string(),
-        "-Wl,--gc-sections".to_string(),
-        "-Wl,--as-needed".to_string(),
-    ]);
+    let mut pre_link_args = LinkArgs::new();
+    pre_link_args.insert(
+        LinkerFlavor::Lld(LldFlavor::Ld),
+        vec!["--build-id".to_string(), "--hash-style=gnu".to_string(), "--Bstatic".to_string()],
+    );
 
     TargetOptions {
-        exe_allocation_crate: None,
+        linker: Some("rust-lld".to_owned()),
         executables: true,
         has_elf_tls: true,
         linker_is_gnu: true,
-        no_default_libraries: false,
+        pre_link_args,
+        no_default_libraries: true,
         panic_strategy: PanicStrategy::Abort,
-        position_independent_executables: false,
-        pre_link_args: args,
+        position_independent_executables: true,
         relocation_model: "static".to_string(),
-        target_family: Some("unix".to_string()),
-        tls_model: "local-exec".to_string(),
-        .. Default::default()
+        target_family: None,
+        tls_model: "initial-exec".to_string(),
+        ..Default::default()
     }
 }

@@ -1,23 +1,14 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use fmt;
-use io;
-use net::{SocketAddr, Shutdown, Ipv4Addr, Ipv6Addr};
-use time::Duration;
-use sys::{unsupported, Void};
+use crate::convert::TryFrom;
+use crate::fmt;
+use crate::io::{self, IoSlice, IoSliceMut};
+use crate::net::{Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr};
+use crate::sys::{unsupported, Void};
+use crate::time::Duration;
 
 pub struct TcpStream(Void);
 
 impl TcpStream {
-    pub fn connect(_: &SocketAddr) -> io::Result<TcpStream> {
+    pub fn connect(_: io::Result<&SocketAddr>) -> io::Result<TcpStream> {
         unsupported()
     }
 
@@ -49,7 +40,15 @@ impl TcpStream {
         match self.0 {}
     }
 
+    pub fn read_vectored(&self, _: &mut [IoSliceMut<'_>]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
     pub fn write(&self, _: &[u8]) -> io::Result<usize> {
+        match self.0 {}
+    }
+
+    pub fn write_vectored(&self, _: &[IoSlice<'_>]) -> io::Result<usize> {
         match self.0 {}
     }
 
@@ -95,7 +94,7 @@ impl TcpStream {
 }
 
 impl fmt::Debug for TcpStream {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {}
     }
 }
@@ -103,7 +102,7 @@ impl fmt::Debug for TcpStream {
 pub struct TcpListener(Void);
 
 impl TcpListener {
-    pub fn bind(_: &SocketAddr) -> io::Result<TcpListener> {
+    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<TcpListener> {
         unsupported()
     }
 
@@ -145,7 +144,7 @@ impl TcpListener {
 }
 
 impl fmt::Debug for TcpListener {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {}
     }
 }
@@ -153,8 +152,12 @@ impl fmt::Debug for TcpListener {
 pub struct UdpSocket(Void);
 
 impl UdpSocket {
-    pub fn bind(_: &SocketAddr) -> io::Result<UdpSocket> {
+    pub fn bind(_: io::Result<&SocketAddr>) -> io::Result<UdpSocket> {
         unsupported()
+    }
+
+    pub fn peer_addr(&self) -> io::Result<SocketAddr> {
+        match self.0 {}
     }
 
     pub fn socket_addr(&self) -> io::Result<SocketAddr> {
@@ -225,23 +228,19 @@ impl UdpSocket {
         match self.0 {}
     }
 
-    pub fn join_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr)
-                         -> io::Result<()> {
+    pub fn join_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
         match self.0 {}
     }
 
-    pub fn join_multicast_v6(&self, _: &Ipv6Addr, _: u32)
-                         -> io::Result<()> {
+    pub fn join_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
         match self.0 {}
     }
 
-    pub fn leave_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr)
-                          -> io::Result<()> {
+    pub fn leave_multicast_v4(&self, _: &Ipv4Addr, _: &Ipv4Addr) -> io::Result<()> {
         match self.0 {}
     }
 
-    pub fn leave_multicast_v6(&self, _: &Ipv6Addr, _: u32)
-                          -> io::Result<()> {
+    pub fn leave_multicast_v6(&self, _: &Ipv6Addr, _: u32) -> io::Result<()> {
         match self.0 {}
     }
 
@@ -273,18 +272,24 @@ impl UdpSocket {
         match self.0 {}
     }
 
-    pub fn connect(&self, _: &SocketAddr) -> io::Result<()> {
+    pub fn connect(&self, _: io::Result<&SocketAddr>) -> io::Result<()> {
         match self.0 {}
     }
 }
 
 impl fmt::Debug for UdpSocket {
-    fn fmt(&self, _f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.0 {}
     }
 }
 
 pub struct LookupHost(Void);
+
+impl LookupHost {
+    pub fn port(&self) -> u16 {
+        match self.0 {}
+    }
+}
 
 impl Iterator for LookupHost {
     type Item = SocketAddr;
@@ -293,11 +298,23 @@ impl Iterator for LookupHost {
     }
 }
 
-pub fn lookup_host(_: &str) -> io::Result<LookupHost> {
-    unsupported()
+impl TryFrom<&str> for LookupHost {
+    type Error = io::Error;
+
+    fn try_from(_v: &str) -> io::Result<LookupHost> {
+        unsupported()
+    }
 }
 
-#[allow(bad_style)]
+impl<'a> TryFrom<(&'a str, u16)> for LookupHost {
+    type Error = io::Error;
+
+    fn try_from(_v: (&'a str, u16)) -> io::Result<LookupHost> {
+        unsupported()
+    }
+}
+
+#[allow(nonstandard_style)]
 pub mod netc {
     pub const AF_INET: u8 = 0;
     pub const AF_INET6: u8 = 1;
@@ -330,8 +347,7 @@ pub mod netc {
     }
 
     #[derive(Copy, Clone)]
-    pub struct sockaddr {
-    }
+    pub struct sockaddr {}
 
     pub type socklen_t = usize;
 }

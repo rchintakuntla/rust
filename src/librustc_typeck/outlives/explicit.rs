@@ -1,16 +1,6 @@
-// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
+use crate::util::nodemap::FxHashMap;
 use rustc::hir::def_id::DefId;
 use rustc::ty::{self, OutlivesPredicate, TyCtxt};
-use util::nodemap::FxHashMap;
 
 use super::utils::*;
 
@@ -21,30 +11,34 @@ pub struct ExplicitPredicatesMap<'tcx> {
 
 impl<'tcx> ExplicitPredicatesMap<'tcx> {
     pub fn new() -> ExplicitPredicatesMap<'tcx> {
-        ExplicitPredicatesMap {
-            map: FxHashMap::default(),
-        }
+        ExplicitPredicatesMap { map: FxHashMap::default() }
     }
 
     pub fn explicit_predicates_of(
         &mut self,
-        tcx: TyCtxt<'_, 'tcx, 'tcx>,
+        tcx: TyCtxt<'tcx>,
         def_id: DefId,
     ) -> &RequiredPredicates<'tcx> {
         self.map.entry(def_id).or_insert_with(|| {
             let predicates = if def_id.is_local() {
-                tcx.explicit_predicates_of(def_id).predicates
+                tcx.explicit_predicates_of(def_id)
             } else {
-                tcx.predicates_of(def_id).predicates
+                tcx.predicates_of(def_id)
             };
             let mut required_predicates = RequiredPredicates::default();
 
             // process predicates and convert to `RequiredPredicates` entry, see below
-            for pred in predicates.into_iter() {
-                match pred {
+            for &(predicate, span) in predicates.predicates {
+                match predicate {
                     ty::Predicate::TypeOutlives(predicate) => {
                         let OutlivesPredicate(ref ty, ref reg) = predicate.skip_binder();
-                        insert_outlives_predicate(tcx, (*ty).into(), reg, &mut required_predicates)
+                        insert_outlives_predicate(
+                            tcx,
+                            (*ty).into(),
+                            reg,
+                            span,
+                            &mut required_predicates,
+                        )
                     }
 
                     ty::Predicate::RegionOutlives(predicate) => {
@@ -53,6 +47,7 @@ impl<'tcx> ExplicitPredicatesMap<'tcx> {
                             tcx,
                             (*reg1).into(),
                             reg2,
+                            span,
                             &mut required_predicates,
                         )
                     }

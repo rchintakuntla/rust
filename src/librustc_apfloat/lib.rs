@@ -1,13 +1,3 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Port of LLVM's APFloat software floating-point implementation from the
 //! following C++ sources (please update commit hash when backporting):
 //! <https://github.com/llvm-mirror/llvm/tree/23efab2bbd424ed13495a420ad8641cb2c6c28f9>
@@ -26,8 +16,8 @@
 //! Comments have been preserved where possible, only slightly adapted.
 //!
 //! Instead of keeping a pointer to a configuration struct and inspecting it
-//! dynamically on every operation, types (e.g. `ieee::Double`), traits
-//! (e.g. `ieee::Semantics`) and associated constants are employed for
+//! dynamically on every operation, types (e.g., `ieee::Double`), traits
+//! (e.g., `ieee::Semantics`) and associated constants are employed for
 //! increased type safety and performance.
 //!
 //! On-heap bigints are replaced everywhere (except in decimal conversion),
@@ -40,27 +30,21 @@
 //!
 //! This API is completely unstable and subject to change.
 
-#![doc(html_logo_url = "https://www.rust-lang.org/logos/rust-logo-128x128-blk-v2.png",
-      html_favicon_url = "https://doc.rust-lang.org/favicon.ico",
-      html_root_url = "https://doc.rust-lang.org/nightly/")]
+#![doc(html_root_url = "https://doc.rust-lang.org/nightly/")]
+#![no_std]
 #![forbid(unsafe_code)]
-
-#![cfg_attr(not(stage0), feature(nll))]
-#![feature(try_from)]
-// See librustc_cratesio_shim/Cargo.toml for a comment explaining this.
-#[allow(unused_extern_crates)]
-extern crate rustc_cratesio_shim;
+#![feature(nll)]
 
 #[macro_use]
-extern crate bitflags;
+extern crate alloc;
 
-use std::cmp::Ordering;
-use std::fmt;
-use std::ops::{Neg, Add, Sub, Mul, Div, Rem};
-use std::ops::{AddAssign, SubAssign, MulAssign, DivAssign, RemAssign};
-use std::str::FromStr;
+use core::cmp::Ordering;
+use core::fmt;
+use core::ops::{Add, Div, Mul, Neg, Rem, Sub};
+use core::ops::{AddAssign, DivAssign, MulAssign, RemAssign, SubAssign};
+use core::str::FromStr;
 
-bitflags! {
+bitflags::bitflags! {
     /// IEEE-754R 7: Default exception handling.
     ///
     /// UNDERFLOW or OVERFLOW are always returned or-ed with INEXACT.
@@ -84,19 +68,13 @@ pub struct StatusAnd<T> {
 
 impl Status {
     pub fn and<T>(self, value: T) -> StatusAnd<T> {
-        StatusAnd {
-            status: self,
-            value,
-        }
+        StatusAnd { status: self, value }
     }
 }
 
 impl<T> StatusAnd<T> {
     pub fn map<F: FnOnce(T) -> U, U>(self, f: F) -> StatusAnd<U> {
-        StatusAnd {
-            status: self.status,
-            value: f(self.value),
-        }
+        StatusAnd { status: self.status, value: f(self.value) }
     }
 }
 
@@ -117,7 +95,7 @@ macro_rules! unpack {
                 value
             }
         }
-    }
+    };
 }
 
 /// Category of internally-represented number.
@@ -178,7 +156,7 @@ pub struct ParseError(pub &'static str);
 /// implemented operations. Currently implemented operations are add, subtract,
 /// multiply, divide, fused-multiply-add, conversion-to-float,
 /// conversion-to-integer and conversion-from-integer. New rounding modes
-/// (e.g. away from zero) can be added with three or four lines of code.
+/// (e.g., away from zero) can be added with three or four lines of code.
 ///
 /// Four formats are built-in: IEEE single precision, double precision,
 /// quadruple precision, and x87 80-bit extended double (when operating with
@@ -234,8 +212,8 @@ pub struct ParseError(pub &'static str);
 ///
 /// New operations: sqrt, nexttoward.
 ///
-pub trait Float
-    : Copy
+pub trait Float:
+    Copy
     + Default
     + FromStr<Err = ParseError>
     + PartialOrd
@@ -250,7 +228,8 @@ pub trait Float
     + Sub<Output = StatusAnd<Self>>
     + Mul<Output = StatusAnd<Self>>
     + Div<Output = StatusAnd<Self>>
-    + Rem<Output = StatusAnd<Self>> {
+    + Rem<Output = StatusAnd<Self>>
+{
     /// Total number of bits in the in-memory format.
     const BITS: usize;
 
@@ -363,11 +342,7 @@ pub trait Float
         if self.is_negative() { -self } else { self }
     }
     fn copy_sign(self, rhs: Self) -> Self {
-        if self.is_negative() != rhs.is_negative() {
-            -self
-        } else {
-            self
-        }
+        if self.is_negative() != rhs.is_negative() { -self } else { self }
     }
 
     // Conversions
@@ -389,7 +364,7 @@ pub trait Float
     fn from_str_r(s: &str, round: Round) -> Result<StatusAnd<Self>, ParseError>;
     fn to_bits(self) -> u128;
 
-    /// Convert a floating point number to an integer according to the
+    /// Converts a floating point number to an integer according to the
     /// rounding mode. In case of an invalid operation exception,
     /// deterministic values are returned, namely zero for NaNs and the
     /// minimal or maximal value respectively for underflow or overflow.
@@ -402,7 +377,7 @@ pub trait Float
     ///
     /// The *is_exact output tells whether the result is exact, in the sense
     /// that converting it back to the original floating point type produces
-    /// the original value. This is almost equivalent to result==Status::OK,
+    /// the original value. This is almost equivalent to `result == Status::OK`,
     /// except for negative zeroes.
     fn to_i128_r(self, width: usize, round: Round, is_exact: &mut bool) -> StatusAnd<i128> {
         let status;
@@ -424,9 +399,7 @@ pub trait Float
         } else {
             // Positive case is simpler, can pretend it's a smaller unsigned
             // integer, and `to_u128` will take care of all the edge cases.
-            self.to_u128_r(width - 1, round, is_exact).map(
-                |r| r as i128,
-            )
+            self.to_u128_r(width - 1, round, is_exact).map(|r| r as i128)
         }
     }
     fn to_i128(self, width: usize) -> StatusAnd<i128> {
@@ -472,13 +445,13 @@ pub trait Float
         }
     }
 
-    /// IEEE-754R isSignMinus: Returns true if and only if the current value is
+    /// IEEE-754R isSignMinus: Returns whether the current value is
     /// negative.
     ///
     /// This applies to zeros and NaNs as well.
     fn is_negative(self) -> bool;
 
-    /// IEEE-754R isNormal: Returns true if and only if the current value is normal.
+    /// IEEE-754R isNormal: Returns whether the current value is normal.
     ///
     /// This implies that the current value of the float is not zero, subnormal,
     /// infinite, or NaN following the definition of normality from IEEE-754R.
@@ -486,7 +459,7 @@ pub trait Float
         !self.is_denormal() && self.is_finite_non_zero()
     }
 
-    /// Returns true if and only if the current value is zero, subnormal, or
+    /// Returns `true` if the current value is zero, subnormal, or
     /// normal.
     ///
     /// This means that the value is not infinite or NaN.
@@ -494,26 +467,26 @@ pub trait Float
         !self.is_nan() && !self.is_infinite()
     }
 
-    /// Returns true if and only if the float is plus or minus zero.
+    /// Returns `true` if the float is plus or minus zero.
     fn is_zero(self) -> bool {
         self.category() == Category::Zero
     }
 
-    /// IEEE-754R isSubnormal(): Returns true if and only if the float is a
+    /// IEEE-754R isSubnormal(): Returns whether the float is a
     /// denormal.
     fn is_denormal(self) -> bool;
 
-    /// IEEE-754R isInfinite(): Returns true if and only if the float is infinity.
+    /// IEEE-754R isInfinite(): Returns whether the float is infinity.
     fn is_infinite(self) -> bool {
         self.category() == Category::Infinity
     }
 
-    /// Returns true if and only if the float is a quiet or signaling NaN.
+    /// Returns `true` if the float is a quiet or signaling NaN.
     fn is_nan(self) -> bool {
         self.category() == Category::NaN
     }
 
-    /// Returns true if and only if the float is a signaling NaN.
+    /// Returns `true` if the float is a signaling NaN.
     fn is_signaling(self) -> bool;
 
     // Simple Queries
@@ -532,27 +505,25 @@ pub trait Float
         self.is_zero() && self.is_negative()
     }
 
-    /// Returns true if and only if the number has the smallest possible non-zero
+    /// Returns `true` if the number has the smallest possible non-zero
     /// magnitude in the current semantics.
     fn is_smallest(self) -> bool {
         Self::SMALLEST.copy_sign(self).bitwise_eq(self)
     }
 
-    /// Returns true if and only if the number has the largest possible finite
+    /// Returns `true` if the number has the largest possible finite
     /// magnitude in the current semantics.
     fn is_largest(self) -> bool {
         Self::largest().copy_sign(self).bitwise_eq(self)
     }
 
-    /// Returns true if and only if the number is an exact integer.
+    /// Returns `true` if the number is an exact integer.
     fn is_integer(self) -> bool {
         // This could be made more efficient; I'm going for obviously correct.
         if !self.is_finite() {
             return false;
         }
-        self.round_to_integral(Round::TowardZero).value.bitwise_eq(
-            self,
-        )
+        self.round_to_integral(Round::TowardZero).value.bitwise_eq(self)
     }
 
     /// If this value has an exact multiplicative inverse, return it.
@@ -570,12 +541,13 @@ pub trait Float
     fn ilogb(self) -> ExpInt;
 
     /// Returns: self * 2<sup>exp</sup> for integral exponents.
+    /// Equivalent to C standard library function `ldexp`.
     fn scalbn_r(self, exp: ExpInt, round: Round) -> Self;
     fn scalbn(self, exp: ExpInt) -> Self {
         self.scalbn_r(exp, Round::NearestTiesToEven)
     }
 
-    /// Equivalent of C standard library function.
+    /// Equivalent to C standard library function with the same name.
     ///
     /// While the C standard says exp is an unspecified value for infinity and nan,
     /// this returns INT_MAX for infinities, and INT_MIN for NaNs (see `ilogb`).
@@ -586,11 +558,11 @@ pub trait Float
 }
 
 pub trait FloatConvert<T: Float>: Float {
-    /// Convert a value of one floating point type to another.
+    /// Converts a value of one floating point type to another.
     /// The return value corresponds to the IEEE754 exceptions. *loses_info
-    /// records whether the transformation lost information, i.e. whether
+    /// records whether the transformation lost information, i.e., whether
     /// converting the result back to the original type will produce the
-    /// original value (this is almost the same as return value==Status::OK,
+    /// original value (this is almost the same as return `value == Status::OK`,
     /// but there are edge cases where this is not so).
     fn convert_r(self, round: Round, loses_info: &mut bool) -> StatusAnd<T>;
     fn convert(self, loses_info: &mut bool) -> StatusAnd<T> {
@@ -600,13 +572,19 @@ pub trait FloatConvert<T: Float>: Float {
 
 macro_rules! float_common_impls {
     ($ty:ident<$t:tt>) => {
-        impl<$t> Default for $ty<$t> where Self: Float {
+        impl<$t> Default for $ty<$t>
+        where
+            Self: Float,
+        {
             fn default() -> Self {
                 Self::ZERO
             }
         }
 
-        impl<$t> ::std::str::FromStr for $ty<$t> where Self: Float {
+        impl<$t> ::core::str::FromStr for $ty<$t>
+        where
+            Self: Float,
+        {
             type Err = ParseError;
             fn from_str(s: &str) -> Result<Self, ParseError> {
                 Self::from_str_r(s, Round::NearestTiesToEven).map(|x| x.value)
@@ -615,71 +593,101 @@ macro_rules! float_common_impls {
 
         // Rounding ties to the nearest even, by default.
 
-        impl<$t> ::std::ops::Add for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::Add for $ty<$t>
+        where
+            Self: Float,
+        {
             type Output = StatusAnd<Self>;
             fn add(self, rhs: Self) -> StatusAnd<Self> {
                 self.add_r(rhs, Round::NearestTiesToEven)
             }
         }
 
-        impl<$t> ::std::ops::Sub for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::Sub for $ty<$t>
+        where
+            Self: Float,
+        {
             type Output = StatusAnd<Self>;
             fn sub(self, rhs: Self) -> StatusAnd<Self> {
                 self.sub_r(rhs, Round::NearestTiesToEven)
             }
         }
 
-        impl<$t> ::std::ops::Mul for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::Mul for $ty<$t>
+        where
+            Self: Float,
+        {
             type Output = StatusAnd<Self>;
             fn mul(self, rhs: Self) -> StatusAnd<Self> {
                 self.mul_r(rhs, Round::NearestTiesToEven)
             }
         }
 
-        impl<$t> ::std::ops::Div for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::Div for $ty<$t>
+        where
+            Self: Float,
+        {
             type Output = StatusAnd<Self>;
             fn div(self, rhs: Self) -> StatusAnd<Self> {
                 self.div_r(rhs, Round::NearestTiesToEven)
             }
         }
 
-        impl<$t> ::std::ops::Rem for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::Rem for $ty<$t>
+        where
+            Self: Float,
+        {
             type Output = StatusAnd<Self>;
             fn rem(self, rhs: Self) -> StatusAnd<Self> {
                 self.c_fmod(rhs)
             }
         }
 
-        impl<$t> ::std::ops::AddAssign for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::AddAssign for $ty<$t>
+        where
+            Self: Float,
+        {
             fn add_assign(&mut self, rhs: Self) {
                 *self = (*self + rhs).value;
             }
         }
 
-        impl<$t> ::std::ops::SubAssign for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::SubAssign for $ty<$t>
+        where
+            Self: Float,
+        {
             fn sub_assign(&mut self, rhs: Self) {
                 *self = (*self - rhs).value;
             }
         }
 
-        impl<$t> ::std::ops::MulAssign for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::MulAssign for $ty<$t>
+        where
+            Self: Float,
+        {
             fn mul_assign(&mut self, rhs: Self) {
                 *self = (*self * rhs).value;
             }
         }
 
-        impl<$t> ::std::ops::DivAssign for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::DivAssign for $ty<$t>
+        where
+            Self: Float,
+        {
             fn div_assign(&mut self, rhs: Self) {
                 *self = (*self / rhs).value;
             }
         }
 
-        impl<$t> ::std::ops::RemAssign for $ty<$t> where Self: Float {
+        impl<$t> ::core::ops::RemAssign for $ty<$t>
+        where
+            Self: Float,
+        {
             fn rem_assign(&mut self, rhs: Self) {
                 *self = (*self % rhs).value;
             }
         }
-    }
+    };
 }
 
 pub mod ieee;

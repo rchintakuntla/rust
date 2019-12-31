@@ -35,7 +35,7 @@ talk about later in this section.
 ## warn
 
 The 'warn' lint level will produce a warning if you violate the lint. For example,
-this code runs afoul of the `unused_variable` lint:
+this code runs afoul of the `unused_variables` lint:
 
 ```rust
 pub fn foo() {
@@ -45,7 +45,7 @@ pub fn foo() {
 
 This will produce this warning:
 
-```console
+```bash
 $ rustc lib.rs --crate-type=lib
 warning: unused variable: `x`
  --> lib.rs:2:9
@@ -53,7 +53,7 @@ warning: unused variable: `x`
 2 |     let x = 5;
   |         ^
   |
-  = note: #[warn(unused_variables)] on by default
+  = note: `#[warn(unused_variables)]` on by default
   = note: to avoid this warning, consider using `_x` instead
 ```
 
@@ -69,14 +69,14 @@ fn main() {
 ```
 
 ```bash
-> rustc main.rs
+$ rustc main.rs
 error: bitshift exceeds the type's number of bits
  --> main.rs:2:13
   |
 2 |     100u8 << 10;
   |     ^^^^^^^^^^^
   |
-  = note: #[deny(exceeding_bitshifts)] on by default
+  = note: `#[deny(exceeding_bitshifts)]` on by default
 ```
 
 What's the difference between an error from a lint and a regular old error?
@@ -90,7 +90,9 @@ This lint level gives you that.
 'forbid' is a special lint level that's stronger than 'deny'. It's the same
 as 'deny' in that a lint at this level will produce an error, but unlike the
 'deny' level, the 'forbid' level can not be overridden to be anything lower
-than an error.
+than an error.  However, lint levels may still be capped with `--cap-lints`
+(see below) so `rustc --cap-lints warn` will make lints set to 'forbid' just
+warn.
 
 ## Configuring warning levels
 
@@ -129,7 +131,10 @@ warning: missing documentation for a function
   |
 1 | pub fn foo() {}
   | ^^^^^^^^^^^^
-> rustc lib.rs --crate-type=lib -D missing-docs
+```
+
+```bash
+$ rustc lib.rs --crate-type=lib -D missing-docs
 error: missing documentation for crate
  --> lib.rs:1:1
   |
@@ -150,13 +155,13 @@ error: aborting due to 2 previous errors
 You can also pass each flag more than once for changing multiple lints:
 
 ```bash
-rustc lib.rs --crate-type=lib -D missing-docs -D unused-variables
+$ rustc lib.rs --crate-type=lib -D missing-docs -D unused-variables
 ```
 
 And of course, you can mix these four flags together:
 
 ```bash
-rustc lib.rs --crate-type=lib -D missing-docs -A unused-variables
+$ rustc lib.rs --crate-type=lib -D missing-docs -A unused-variables
 ```
 
 ### Via an attribute
@@ -164,7 +169,7 @@ rustc lib.rs --crate-type=lib -D missing-docs -A unused-variables
 You can also modify the lint level with a crate-wide attribute:
 
 ```bash
-> cat lib.rs
+$ cat lib.rs
 #![warn(missing_docs)]
 
 pub fn foo() {}
@@ -231,7 +236,7 @@ warning: bitshift exceeds the type's number of bits
 2 |     100u8 << 10;
   |     ^^^^^^^^^^^
   |
-  = note: #[warn(exceeding_bitshifts)] on by default
+  = note: `#[warn(exceeding_bitshifts)]` on by default
 
 warning: this expression will panic at run-time
  --> lib.rs:2:5

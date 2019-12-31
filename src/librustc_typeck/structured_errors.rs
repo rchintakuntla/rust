@@ -1,17 +1,9 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
+use errors::{Applicability, DiagnosticBuilder, DiagnosticId};
 use rustc::session::Session;
-use syntax_pos::Span;
-use errors::{DiagnosticId, DiagnosticBuilder};
 use rustc::ty::{Ty, TypeFoldable};
+use syntax_pos::Span;
+
+use rustc_error_codes::*;
 
 pub trait StructuredDiagnostic<'tcx> {
     fn session(&self) -> &Session;
@@ -22,11 +14,7 @@ pub trait StructuredDiagnostic<'tcx> {
 
     fn diagnostic(&self) -> DiagnosticBuilder<'tcx> {
         let err = self.common();
-        if self.session().teach(&self.code()) {
-            self.extended(err)
-        } else {
-            self.regular(err)
-        }
+        if self.session().teach(&self.code()) { self.extended(err) } else { self.regular(err) }
     }
 
     fn regular(&self, err: DiagnosticBuilder<'tcx>) -> DiagnosticBuilder<'tcx> {
@@ -46,19 +34,23 @@ pub struct VariadicError<'tcx> {
 }
 
 impl<'tcx> VariadicError<'tcx> {
-    pub fn new(sess: &'tcx Session,
-               span: Span,
-               t: Ty<'tcx>,
-               cast_ty: &'tcx str) -> VariadicError<'tcx> {
+    pub fn new(
+        sess: &'tcx Session,
+        span: Span,
+        t: Ty<'tcx>,
+        cast_ty: &'tcx str,
+    ) -> VariadicError<'tcx> {
         VariadicError { sess, span, t, cast_ty }
     }
 }
 
 impl<'tcx> StructuredDiagnostic<'tcx> for VariadicError<'tcx> {
-    fn session(&self) -> &Session { self.sess }
+    fn session(&self) -> &Session {
+        self.sess
+    }
 
     fn code(&self) -> DiagnosticId {
-        __diagnostic_used!(E0617);
+        syntax::diagnostic_used!(E0617);
         DiagnosticId::Error("E0617".to_owned())
     }
 
@@ -72,10 +64,13 @@ impl<'tcx> StructuredDiagnostic<'tcx> for VariadicError<'tcx> {
                 self.code(),
             )
         };
-        if let Ok(snippet) = self.sess.codemap().span_to_snippet(self.span) {
-            err.span_suggestion(self.span,
-                                &format!("cast the value to `{}`", self.cast_ty),
-                                format!("{} as {}", snippet, self.cast_ty));
+        if let Ok(snippet) = self.sess.source_map().span_to_snippet(self.span) {
+            err.span_suggestion(
+                self.span,
+                &format!("cast the value to `{}`", self.cast_ty),
+                format!("{} as {}", snippet, self.cast_ty),
+                Applicability::MachineApplicable,
+            );
         } else {
             err.help(&format!("cast the value to `{}`", self.cast_ty));
         }
@@ -83,10 +78,12 @@ impl<'tcx> StructuredDiagnostic<'tcx> for VariadicError<'tcx> {
     }
 
     fn extended(&self, mut err: DiagnosticBuilder<'tcx>) -> DiagnosticBuilder<'tcx> {
-        err.note(&format!("certain types, like `{}`, must be cast before passing them to a \
+        err.note(&format!(
+            "certain types, like `{}`, must be cast before passing them to a \
                            variadic function, because of arcane ABI rules dictated by the C \
                            standard",
-                          self.t));
+            self.t
+        ));
         err
     }
 }
@@ -99,19 +96,23 @@ pub struct SizedUnsizedCastError<'tcx> {
 }
 
 impl<'tcx> SizedUnsizedCastError<'tcx> {
-    pub fn new(sess: &'tcx Session,
-               span: Span,
-               expr_ty: Ty<'tcx>,
-               cast_ty: String) -> SizedUnsizedCastError<'tcx> {
+    pub fn new(
+        sess: &'tcx Session,
+        span: Span,
+        expr_ty: Ty<'tcx>,
+        cast_ty: String,
+    ) -> SizedUnsizedCastError<'tcx> {
         SizedUnsizedCastError { sess, span, expr_ty, cast_ty }
     }
 }
 
 impl<'tcx> StructuredDiagnostic<'tcx> for SizedUnsizedCastError<'tcx> {
-    fn session(&self) -> &Session { self.sess }
+    fn session(&self) -> &Session {
+        self.sess
+    }
 
     fn code(&self) -> DiagnosticId {
-        __diagnostic_used!(E0607);
+        syntax::diagnostic_used!(E0607);
         DiagnosticId::Error("E0607".to_owned())
     }
 
@@ -121,9 +122,10 @@ impl<'tcx> StructuredDiagnostic<'tcx> for SizedUnsizedCastError<'tcx> {
         } else {
             self.sess.struct_span_fatal_with_code(
                 self.span,
-                &format!("cannot cast thin pointer `{}` to fat pointer `{}`",
-                         self.expr_ty,
-                         self.cast_ty),
+                &format!(
+                    "cannot cast thin pointer `{}` to fat pointer `{}`",
+                    self.expr_ty, self.cast_ty
+                ),
                 self.code(),
             )
         }
@@ -144,7 +146,8 @@ To fix this error, don't try to cast directly between thin and fat
 pointers.
 
 For more information about casts, take a look at The Book:
-https://doc.rust-lang.org/book/first-edition/casting-between-types.html");
+https://doc.rust-lang.org/reference/expressions/operator-expr.html#type-cast-expressions",
+        );
         err
     }
 }

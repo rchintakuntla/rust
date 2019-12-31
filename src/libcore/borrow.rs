@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! A module for working with borrowed data.
 
 #![stable(feature = "rust1", since = "1.0.0")]
@@ -41,6 +31,10 @@
 /// underlying type. Generic code typically uses `Borrow<T>` when it relies
 /// on the identical behavior of these additional trait implementations.
 /// These traits will likely appear as additional trait bounds.
+///
+/// In particular `Eq`, `Ord` and `Hash` must be equivalent for
+/// borrowed and owned values: `x.borrow() == y.borrow()` should give the
+/// same result as `x == y`.
 ///
 /// If generic code merely needs to work for all types that can
 /// provide a reference to related type `T`, it is often better to use
@@ -195,7 +189,7 @@ pub trait Borrow<Borrowed: ?Sized> {
 ///
 /// [`Borrow<T>`]: trait.Borrow.html
 #[stable(feature = "rust1", since = "1.0.0")]
-pub trait BorrowMut<Borrowed: ?Sized> : Borrow<Borrowed> {
+pub trait BorrowMut<Borrowed: ?Sized>: Borrow<Borrowed> {
     /// Mutably borrows from an owned value.
     ///
     /// # Examples
@@ -217,25 +211,35 @@ pub trait BorrowMut<Borrowed: ?Sized> : Borrow<Borrowed> {
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized> Borrow<T> for T {
-    fn borrow(&self) -> &T { self }
+    fn borrow(&self) -> &T {
+        self
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
 impl<T: ?Sized> BorrowMut<T> for T {
-    fn borrow_mut(&mut self) -> &mut T { self }
+    fn borrow_mut(&mut self) -> &mut T {
+        self
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, T: ?Sized> Borrow<T> for &'a T {
-    fn borrow(&self) -> &T { &**self }
+impl<T: ?Sized> Borrow<T> for &T {
+    fn borrow(&self) -> &T {
+        &**self
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, T: ?Sized> Borrow<T> for &'a mut T {
-    fn borrow(&self) -> &T { &**self }
+impl<T: ?Sized> Borrow<T> for &mut T {
+    fn borrow(&self) -> &T {
+        &**self
+    }
 }
 
 #[stable(feature = "rust1", since = "1.0.0")]
-impl<'a, T: ?Sized> BorrowMut<T> for &'a mut T {
-    fn borrow_mut(&mut self) -> &mut T { &mut **self }
+impl<T: ?Sized> BorrowMut<T> for &mut T {
+    fn borrow_mut(&mut self) -> &mut T {
+        &mut **self
+    }
 }

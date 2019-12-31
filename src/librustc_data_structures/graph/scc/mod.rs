@@ -1,24 +1,16 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Routine to compute the strongly connected components (SCCs) of a
 //! graph, as well as the resulting DAG if each SCC is replaced with a
 //! node in the graph. This uses Tarjan's algorithm that completes in
 //! O(n) time.
 
-use fx::FxHashSet;
-use graph::{DirectedGraph, WithNumNodes, WithSuccessors};
-use indexed_vec::{Idx, IndexVec};
+use crate::fx::FxHashSet;
+use crate::graph::vec_graph::VecGraph;
+use crate::graph::{DirectedGraph, GraphSuccessors, WithNumEdges, WithNumNodes, WithSuccessors};
+use rustc_index::vec::{Idx, IndexVec};
 use std::ops::Range;
 
-mod test;
+#[cfg(test)]
+mod tests;
 
 /// Strongly connected components (SCC) of a graph. The type `N` is
 /// the index type for the graph nodes and `S` is the index type for
@@ -38,7 +30,7 @@ struct SccData<S: Idx> {
     /// successors can be found.
     ranges: IndexVec<S, Range<usize>>,
 
-    /// Contains the succcessors for all the Sccs, concatenated. The
+    /// Contains the successors for all the Sccs, concatenated. The
     /// range of indices corresponding to a given SCC is found in its
     /// SccData.
     all_successors: Vec<S>,
@@ -56,7 +48,7 @@ impl<N: Idx, S: Idx> Sccs<N, S> {
 
     /// Returns an iterator over the SCCs in the graph.
     pub fn all_sccs(&self) -> impl Iterator<Item = S> {
-        (0 .. self.scc_data.len()).map(S::new)
+        (0..self.scc_data.len()).map(S::new)
     }
 
     /// Returns the SCC to which a node `r` belongs.
@@ -67,6 +59,46 @@ impl<N: Idx, S: Idx> Sccs<N, S> {
     /// Returns the successors of the given SCC.
     pub fn successors(&self, scc: S) -> &[S] {
         self.scc_data.successors(scc)
+    }
+
+    /// Construct the reverse graph of the SCC graph.
+    pub fn reverse(&self) -> VecGraph<S> {
+        VecGraph::new(
+            self.num_sccs(),
+            self.all_sccs()
+                .flat_map(|source| {
+                    self.successors(source).iter().map(move |&target| (target, source))
+                })
+                .collect(),
+        )
+    }
+}
+
+impl<N: Idx, S: Idx> DirectedGraph for Sccs<N, S> {
+    type Node = S;
+}
+
+impl<N: Idx, S: Idx> WithNumNodes for Sccs<N, S> {
+    fn num_nodes(&self) -> usize {
+        self.num_sccs()
+    }
+}
+
+impl<N: Idx, S: Idx> WithNumEdges for Sccs<N, S> {
+    fn num_edges(&self) -> usize {
+        self.scc_data.all_successors.len()
+    }
+}
+
+impl<N: Idx, S: Idx> GraphSuccessors<'graph> for Sccs<N, S> {
+    type Item = S;
+
+    type Iter = std::iter::Cloned<std::slice::Iter<'graph, S>>;
+}
+
+impl<N: Idx, S: Idx> WithSuccessors for Sccs<N, S> {
+    fn successors<'graph>(&'graph self, node: S) -> <Self as GraphSuccessors<'graph>>::Iter {
+        self.successors(node).iter().cloned()
     }
 }
 
@@ -103,7 +135,7 @@ impl<S: Idx> SccData<S> {
     }
 }
 
-struct SccsConstruction<'c, G: DirectedGraph + WithNumNodes + WithSuccessors + 'c, S: Idx> {
+struct SccsConstruction<'c, G: DirectedGraph + WithNumNodes + WithSuccessors, S: Idx> {
     graph: &'c G,
 
     /// The state of each node; used during walk to record the stack
@@ -186,10 +218,7 @@ where
             node_states: IndexVec::from_elem_n(NodeState::NotVisited, num_nodes),
             node_stack: Vec::with_capacity(num_nodes),
             successors_stack: Vec::new(),
-            scc_data: SccData {
-                ranges: IndexVec::new(),
-                all_successors: Vec::new(),
-            },
+            scc_data: SccData { ranges: IndexVec::new(), all_successors: Vec::new() },
             duplicate_set: FxHashSet::default(),
         };
 
@@ -197,20 +226,16 @@ where
             .map(G::Node::new)
             .map(|node| match this.walk_node(0, node) {
                 WalkReturn::Complete { scc_index } => scc_index,
-                WalkReturn::Cycle { min_depth } => panic!(
-                    "`walk_node(0, {:?})` returned cycle with depth {:?}",
-                    node, min_depth
-                ),
+                WalkReturn::Cycle { min_depth } => {
+                    panic!("`walk_node(0, {:?})` returned cycle with depth {:?}", node, min_depth)
+                }
             })
             .collect();
 
-        Sccs {
-            scc_indices,
-            scc_data: this.scc_data,
-        }
+        Sccs { scc_indices, scc_data: this.scc_data }
     }
 
-    /// Visit a node during the DFS. We first examine its current
+    /// Visits a node during the DFS. We first examine its current
     /// state -- if it is not yet visited (`NotVisited`), we can push
     /// it onto the stack and start walking its successors.
     ///
@@ -258,9 +283,8 @@ where
                     }
 
                     NodeState::BeingVisited { depth } => {
-                        self.node_states[r] = NodeState::InCycleWith {
-                            parent: self.node_stack[depth],
-                        };
+                        self.node_states[r] =
+                            NodeState::InCycleWith { parent: self.node_stack[depth] };
                         parent_state
                     }
 
@@ -274,10 +298,7 @@ where
 
     /// Walks a node that has never been visited before.
     fn walk_unvisited_node(&mut self, depth: usize, node: G::Node) -> WalkReturn<S> {
-        debug!(
-            "walk_unvisited_node(depth = {:?}, node = {:?})",
-            depth, node
-        );
+        debug!("walk_unvisited_node(depth = {:?}, node = {:?})", depth, node);
 
         debug_assert!(match self.node_states[node] {
             NodeState::NotVisited => true,
@@ -295,14 +316,9 @@ where
         let mut min_cycle_root = node;
         let successors_len = self.successors_stack.len();
         for successor_node in self.graph.successors(node) {
-            debug!(
-                "walk_unvisited_node: node = {:?} successor_ode = {:?}",
-                node, successor_node
-            );
+            debug!("walk_unvisited_node: node = {:?} successor_ode = {:?}", node, successor_node);
             match self.walk_node(depth + 1, successor_node) {
-                WalkReturn::Cycle {
-                    min_depth: successor_min_depth,
-                } => {
+                WalkReturn::Cycle { min_depth: successor_min_depth } => {
                     // Track the minimum depth we can reach.
                     assert!(successor_min_depth <= depth);
                     if successor_min_depth < min_depth {
@@ -315,9 +331,7 @@ where
                     }
                 }
 
-                WalkReturn::Complete {
-                    scc_index: successor_scc_index,
-                } => {
+                WalkReturn::Complete { scc_index: successor_scc_index } => {
                     // Push the completed SCC indices onto
                     // the `successors_stack` for later.
                     debug!(
@@ -352,9 +366,7 @@ where
             // We are not the head of the cycle. Return back to our
             // caller. They will take ownership of the
             // `self.successors` data that we pushed.
-            self.node_states[node] = NodeState::InCycleWith {
-                parent: min_cycle_root,
-            };
+            self.node_states[node] = NodeState::InCycleWith { parent: min_cycle_root };
             WalkReturn::Cycle { min_depth }
         }
     }

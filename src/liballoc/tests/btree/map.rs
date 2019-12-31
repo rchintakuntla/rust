@@ -1,25 +1,20 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use std::collections::BTreeMap;
 use std::collections::btree_map::Entry::{Occupied, Vacant};
+use std::collections::BTreeMap;
+use std::convert::TryFrom;
+use std::fmt::Debug;
+use std::iter::FromIterator;
 use std::ops::Bound::{self, Excluded, Included, Unbounded};
 use std::rc::Rc;
 
-use std::iter::FromIterator;
 use super::DeterministicRng;
 
 #[test]
 fn test_basic_large() {
     let mut map = BTreeMap::new();
+    #[cfg(not(miri))] // Miri is too slow
     let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
     assert_eq!(map.len(), 0);
 
     for i in 0..size {
@@ -64,28 +59,81 @@ fn test_basic_large() {
 #[test]
 fn test_basic_small() {
     let mut map = BTreeMap::new();
+    // Empty, shared root:
     assert_eq!(map.remove(&1), None);
+    assert_eq!(map.len(), 0);
     assert_eq!(map.get(&1), None);
+    assert_eq!(map.get_mut(&1), None);
+    assert_eq!(map.first_key_value(), None);
+    assert_eq!(map.last_key_value(), None);
+    assert_eq!(map.keys().count(), 0);
+    assert_eq!(map.values().count(), 0);
     assert_eq!(map.insert(1, 1), None);
+
+    // 1 key-value pair:
+    assert_eq!(map.len(), 1);
     assert_eq!(map.get(&1), Some(&1));
+    assert_eq!(map.get_mut(&1), Some(&mut 1));
+    assert_eq!(map.first_key_value(), Some((&1, &1)));
+    assert_eq!(map.last_key_value(), Some((&1, &1)));
+    assert_eq!(map.keys().collect::<Vec<_>>(), vec![&1]);
+    assert_eq!(map.values().collect::<Vec<_>>(), vec![&1]);
     assert_eq!(map.insert(1, 2), Some(1));
+    assert_eq!(map.len(), 1);
     assert_eq!(map.get(&1), Some(&2));
+    assert_eq!(map.get_mut(&1), Some(&mut 2));
+    assert_eq!(map.first_key_value(), Some((&1, &2)));
+    assert_eq!(map.last_key_value(), Some((&1, &2)));
+    assert_eq!(map.keys().collect::<Vec<_>>(), vec![&1]);
+    assert_eq!(map.values().collect::<Vec<_>>(), vec![&2]);
     assert_eq!(map.insert(2, 4), None);
+
+    // 2 key-value pairs:
+    assert_eq!(map.len(), 2);
     assert_eq!(map.get(&2), Some(&4));
+    assert_eq!(map.get_mut(&2), Some(&mut 4));
+    assert_eq!(map.first_key_value(), Some((&1, &2)));
+    assert_eq!(map.last_key_value(), Some((&2, &4)));
+    assert_eq!(map.keys().collect::<Vec<_>>(), vec![&1, &2]);
+    assert_eq!(map.values().collect::<Vec<_>>(), vec![&2, &4]);
     assert_eq!(map.remove(&1), Some(2));
+
+    // 1 key-value pair:
+    assert_eq!(map.len(), 1);
+    assert_eq!(map.get(&1), None);
+    assert_eq!(map.get_mut(&1), None);
+    assert_eq!(map.get(&2), Some(&4));
+    assert_eq!(map.get_mut(&2), Some(&mut 4));
+    assert_eq!(map.first_key_value(), Some((&2, &4)));
+    assert_eq!(map.last_key_value(), Some((&2, &4)));
+    assert_eq!(map.keys().collect::<Vec<_>>(), vec![&2]);
+    assert_eq!(map.values().collect::<Vec<_>>(), vec![&4]);
     assert_eq!(map.remove(&2), Some(4));
+
+    // Empty but private root:
+    assert_eq!(map.len(), 0);
+    assert_eq!(map.get(&1), None);
+    assert_eq!(map.get_mut(&1), None);
+    assert_eq!(map.first_key_value(), None);
+    assert_eq!(map.last_key_value(), None);
+    assert_eq!(map.keys().count(), 0);
+    assert_eq!(map.values().count(), 0);
     assert_eq!(map.remove(&1), None);
 }
 
 #[test]
 fn test_iter() {
+    #[cfg(not(miri))] // Miri is too slow
     let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
 
     // Forwards
     let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
 
     fn test<T>(size: usize, mut iter: T)
-        where T: Iterator<Item = (usize, usize)>
+    where
+        T: Iterator<Item = (usize, usize)>,
     {
         for i in 0..size {
             assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
@@ -101,13 +149,17 @@ fn test_iter() {
 
 #[test]
 fn test_iter_rev() {
+    #[cfg(not(miri))] // Miri is too slow
     let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
 
     // Forwards
     let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
 
     fn test<T>(size: usize, mut iter: T)
-        where T: Iterator<Item = (usize, usize)>
+    where
+        T: Iterator<Item = (usize, usize)>,
     {
         for i in 0..size {
             assert_eq!(iter.size_hint(), (size - i, Some(size - i)));
@@ -119,6 +171,87 @@ fn test_iter_rev() {
     test(size, map.iter().rev().map(|(&k, &v)| (k, v)));
     test(size, map.iter_mut().rev().map(|(&k, &mut v)| (k, v)));
     test(size, map.into_iter().rev());
+}
+
+/// Specifically tests iter_mut's ability to mutate the value of pairs in-line
+fn do_test_iter_mut_mutation<T>(size: usize)
+where
+    T: Copy + Debug + Ord + TryFrom<usize>,
+    <T as std::convert::TryFrom<usize>>::Error: std::fmt::Debug,
+{
+    let zero = T::try_from(0).unwrap();
+    let mut map: BTreeMap<T, T> = (0..size).map(|i| (T::try_from(i).unwrap(), zero)).collect();
+
+    // Forward and backward iteration sees enough pairs (also tested elsewhere)
+    assert_eq!(map.iter_mut().count(), size);
+    assert_eq!(map.iter_mut().rev().count(), size);
+
+    // Iterate forwards, trying to mutate to unique values
+    for (i, (k, v)) in map.iter_mut().enumerate() {
+        assert_eq!(*k, T::try_from(i).unwrap());
+        assert_eq!(*v, zero);
+        *v = T::try_from(i + 1).unwrap();
+    }
+
+    // Iterate backwards, checking that mutations succeeded and trying to mutate again
+    for (i, (k, v)) in map.iter_mut().rev().enumerate() {
+        assert_eq!(*k, T::try_from(size - i - 1).unwrap());
+        assert_eq!(*v, T::try_from(size - i).unwrap());
+        *v = T::try_from(2 * size - i).unwrap();
+    }
+
+    // Check that backward mutations succeeded
+    for (i, (k, v)) in map.iter_mut().enumerate() {
+        assert_eq!(*k, T::try_from(i).unwrap());
+        assert_eq!(*v, T::try_from(size + i + 1).unwrap());
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+#[repr(align(32))]
+struct Align32(usize);
+
+impl TryFrom<usize> for Align32 {
+    type Error = ();
+
+    fn try_from(s: usize) -> Result<Align32, ()> {
+        Ok(Align32(s))
+    }
+}
+
+#[test]
+fn test_iter_mut_mutation() {
+    // Check many alignments because various fields precede array in NodeHeader.
+    // Check with size 0 which should not iterate at all.
+    // Check with size 1 for a tree with one kind of node (root = leaf).
+    // Check with size 12 for a tree with two kinds of nodes (root and leaves).
+    // Check with size 144 for a tree with all kinds of nodes (root, internals and leaves).
+    do_test_iter_mut_mutation::<u8>(0);
+    do_test_iter_mut_mutation::<u8>(1);
+    do_test_iter_mut_mutation::<u8>(12);
+    do_test_iter_mut_mutation::<u8>(127); // not enough unique values to test 144
+    do_test_iter_mut_mutation::<u16>(1);
+    do_test_iter_mut_mutation::<u16>(12);
+    do_test_iter_mut_mutation::<u16>(144);
+    do_test_iter_mut_mutation::<u32>(1);
+    do_test_iter_mut_mutation::<u32>(12);
+    do_test_iter_mut_mutation::<u32>(144);
+    do_test_iter_mut_mutation::<u64>(1);
+    do_test_iter_mut_mutation::<u64>(12);
+    do_test_iter_mut_mutation::<u64>(144);
+    do_test_iter_mut_mutation::<u128>(1);
+    do_test_iter_mut_mutation::<u128>(12);
+    do_test_iter_mut_mutation::<u128>(144);
+    do_test_iter_mut_mutation::<Align32>(1);
+    do_test_iter_mut_mutation::<Align32>(12);
+    do_test_iter_mut_mutation::<Align32>(144);
+}
+
+#[test]
+fn test_into_key_slice_with_shared_root_past_bounds() {
+    let mut map: BTreeMap<Align32, ()> = BTreeMap::new();
+    assert_eq!(map.get(&Align32(1)), None);
+    assert_eq!(map.get_mut(&Align32(1)), None);
 }
 
 #[test]
@@ -137,13 +270,17 @@ fn test_values_mut() {
 
 #[test]
 fn test_iter_mixed() {
+    #[cfg(not(miri))] // Miri is too slow
     let size = 10000;
+    #[cfg(miri)]
+    let size = 200;
 
     // Forwards
     let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
 
     fn test<T>(size: usize, mut iter: T)
-        where T: Iterator<Item = (usize, usize)> + DoubleEndedIterator
+    where
+        T: Iterator<Item = (usize, usize)> + DoubleEndedIterator,
     {
         for i in 0..size / 4 {
             assert_eq!(iter.size_hint(), (size - i * 2, Some(size - i * 2)));
@@ -185,8 +322,9 @@ fn test_range_inclusive() {
     let map: BTreeMap<_, _> = (0..=size).map(|i| (i, i)).collect();
 
     fn check<'a, L, R>(lhs: L, rhs: R)
-        where L: IntoIterator<Item=(&'a i32, &'a i32)>,
-              R: IntoIterator<Item=(&'a i32, &'a i32)>,
+    where
+        L: IntoIterator<Item = (&'a i32, &'a i32)>,
+        R: IntoIterator<Item = (&'a i32, &'a i32)>,
     {
         let lhs: Vec<_> = lhs.into_iter().collect();
         let rhs: Vec<_> = rhs.into_iter().collect();
@@ -209,7 +347,7 @@ fn test_range_inclusive() {
 
 #[test]
 fn test_range_inclusive_max_value() {
-    let max = ::std::usize::MAX;
+    let max = std::usize::MAX;
     let map: BTreeMap<_, _> = vec![(max, 0)].into_iter().collect();
 
     assert_eq!(map.range(max..=max).collect::<Vec<_>>(), &[(&max, &0)]);
@@ -259,7 +397,10 @@ fn test_range_backwards_4() {
 
 #[test]
 fn test_range_1000() {
+    #[cfg(not(miri))] // Miri is too slow
     let size = 1000;
+    #[cfg(miri)]
+    let size = 200;
     let map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
 
     fn test(map: &BTreeMap<u32, u32>, size: u32, min: Bound<&u32>, max: Bound<&u32>) {
@@ -288,7 +429,7 @@ fn test_range_borrowed_key() {
     map.insert("coyote".to_string(), 3);
     map.insert("dingo".to_string(), 4);
     // NOTE: would like to use simply "b".."d" here...
-    let mut iter = map.range::<str, _>((Included("b"),Excluded("d")));
+    let mut iter = map.range::<str, _>((Included("b"), Excluded("d")));
     assert_eq!(iter.next(), Some((&"baboon".to_string(), &2)));
     assert_eq!(iter.next(), Some((&"coyote".to_string(), &3)));
     assert_eq!(iter.next(), None);
@@ -296,13 +437,16 @@ fn test_range_borrowed_key() {
 
 #[test]
 fn test_range() {
+    #[cfg(not(miri))] // Miri is too slow
     let size = 200;
+    #[cfg(miri)]
+    let size = 30;
     let map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
 
     for i in 0..size {
         for j in i..size {
             let mut kvs = map.range((Included(&i), Included(&j))).map(|(&k, &v)| (k, v));
-            let mut pairs = (i..j + 1).map(|i| (i, i));
+            let mut pairs = (i..=j).map(|i| (i, i));
 
             for (kv, pair) in kvs.by_ref().zip(pairs.by_ref()) {
                 assert_eq!(kv, pair);
@@ -315,13 +459,16 @@ fn test_range() {
 
 #[test]
 fn test_range_mut() {
+    #[cfg(not(miri))] // Miri is too slow
     let size = 200;
+    #[cfg(miri)]
+    let size = 30;
     let mut map: BTreeMap<_, _> = (0..size).map(|i| (i, i)).collect();
 
     for i in 0..size {
         for j in i..size {
             let mut kvs = map.range_mut((Included(&i), Included(&j))).map(|(&k, &mut v)| (k, v));
-            let mut pairs = (i..j + 1).map(|i| (i, i));
+            let mut pairs = (i..=j).map(|i| (i, i));
 
             for (kv, pair) in kvs.by_ref().zip(pairs.by_ref()) {
                 assert_eq!(kv, pair);
@@ -377,7 +524,6 @@ fn test_entry() {
     assert_eq!(map.get(&1).unwrap(), &100);
     assert_eq!(map.len(), 6);
 
-
     // Existing key (update)
     match map.entry(2) {
         Vacant(_) => unreachable!(),
@@ -398,7 +544,6 @@ fn test_entry() {
     }
     assert_eq!(map.get(&3), None);
     assert_eq!(map.len(), 5);
-
 
     // Inexistent key (insert)
     match map.entry(10) {
@@ -489,7 +634,10 @@ fn test_bad_zst() {
 #[test]
 fn test_clone() {
     let mut map = BTreeMap::new();
+    #[cfg(not(miri))] // Miri is too slow
     let size = 100;
+    #[cfg(miri)]
+    let size = 30;
     assert_eq!(map.len(), 0);
 
     for i in 0..size {
@@ -521,7 +669,7 @@ fn test_clone() {
 #[test]
 #[allow(dead_code)]
 fn test_variance() {
-    use std::collections::btree_map::{Iter, IntoIter, Range, Keys, Values};
+    use std::collections::btree_map::{IntoIter, Iter, Keys, Range, Values};
 
     fn map_key<'new>(v: BTreeMap<&'static str, ()>) -> BTreeMap<&'new str, ()> {
         v
@@ -591,6 +739,30 @@ fn test_vacant_entry_key() {
     assert_eq!(a[key], value);
 }
 
+#[test]
+fn test_first_last_entry() {
+    let mut a = BTreeMap::new();
+    assert!(a.first_entry().is_none());
+    assert!(a.last_entry().is_none());
+    a.insert(1, 42);
+    assert_eq!(a.first_entry().unwrap().key(), &1);
+    assert_eq!(a.last_entry().unwrap().key(), &1);
+    a.insert(2, 24);
+    assert_eq!(a.first_entry().unwrap().key(), &1);
+    assert_eq!(a.last_entry().unwrap().key(), &2);
+    a.insert(0, 6);
+    assert_eq!(a.first_entry().unwrap().key(), &0);
+    assert_eq!(a.last_entry().unwrap().key(), &2);
+    let (k1, v1) = a.first_entry().unwrap().remove_entry();
+    assert_eq!(k1, 0);
+    assert_eq!(v1, 6);
+    let (k2, v2) = a.last_entry().unwrap().remove_entry();
+    assert_eq!(k2, 2);
+    assert_eq!(v2, 24);
+    assert_eq!(a.first_entry().unwrap().key(), &1);
+    assert_eq!(a.last_entry().unwrap().key(), &1);
+}
+
 macro_rules! create_append_test {
     ($name:ident, $len:expr) => {
         #[test]
@@ -602,7 +774,7 @@ macro_rules! create_append_test {
 
             let mut b = BTreeMap::new();
             for i in 5..$len {
-                b.insert(i, 2*i);
+                b.insert(i, 2 * i);
             }
 
             a.append(&mut b);
@@ -614,12 +786,12 @@ macro_rules! create_append_test {
                 if i < 5 {
                     assert_eq!(a[&i], i);
                 } else {
-                    assert_eq!(a[&i], 2*i);
+                    assert_eq!(a[&i], 2 * i);
                 }
             }
 
-            assert_eq!(a.remove(&($len-1)), Some(2*($len-1)));
-            assert_eq!(a.insert($len-1, 20), None);
+            assert_eq!(a.remove(&($len - 1)), Some(2 * ($len - 1)));
+            assert_eq!(a.insert($len - 1, 20), None);
         }
     };
 }
@@ -641,6 +813,7 @@ create_append_test!(test_append_145, 145);
 create_append_test!(test_append_170, 170);
 create_append_test!(test_append_181, 181);
 create_append_test!(test_append_239, 239);
+#[cfg(not(miri))] // Miri is too slow
 create_append_test!(test_append_1700, 1700);
 
 fn rand_data(len: usize) -> Vec<(u32, u32)> {
@@ -674,7 +847,10 @@ fn test_split_off_empty_left() {
 
 #[test]
 fn test_split_off_large_random_sorted() {
+    #[cfg(not(miri))] // Miri is too slow
     let mut data = rand_data(1529);
+    #[cfg(miri)]
+    let mut data = rand_data(529);
     // special case with maximum height.
     data.sort();
 

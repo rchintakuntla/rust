@@ -1,40 +1,37 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-// compile-pass
+// build-pass
 
        //! Test with [Foo::baz], [Bar::foo], ...
+//~^ WARNING `[Foo::baz]` cannot be resolved
+//~| WARNING `[Bar::foo]` cannot be resolved
      //! , [Uniooon::X] and [Qux::Z].
+//~^ WARNING `[Uniooon::X]` cannot be resolved
+//~| WARNING `[Qux::Z]` cannot be resolved
        //!
       //! , [Uniooon::X] and [Qux::Z].
+//~^ WARNING `[Uniooon::X]` cannot be resolved
+//~| WARNING `[Qux::Z]` cannot be resolved
 
        /// [Qux:Y]
+//~^ WARNING `[Qux:Y]` cannot be resolved
 pub struct Foo {
     pub bar: usize,
 }
 
 /// Foo
-/// bar [BarA] bar
+/// bar [BarA] bar //~ WARNING `[BarA]` cannot be resolved
 /// baz
 pub fn a() {}
 
 /**
  * Foo
- * bar [BarB] bar
+ * bar [BarB] bar //~ WARNING `[BarB]` cannot be resolved
  * baz
  */
 pub fn b() {}
 
 /** Foo
 
-bar [BarC] bar
+bar [BarC] bar //~ WARNING `[BarC]` cannot be resolved
 baz
 
     let bar_c_1 = 0;
@@ -45,13 +42,43 @@ baz
 */
 pub fn c() {}
 
-#[doc = "Foo\nbar [BarD] bar\nbaz"]
+#[doc = "Foo\nbar [BarD] bar\nbaz"] //~ WARNING `[BarD]` cannot be resolved
 pub fn d() {}
 
 macro_rules! f {
     ($f:expr) => {
-        #[doc = $f]
+        #[doc = $f] //~ WARNING `[BarF]` cannot be resolved
         pub fn f() {}
     }
 }
 f!("Foo\nbar [BarF] bar\nbaz");
+
+/** # for example,
+ *
+ * time to introduce a link [error]*/ //~ WARNING `[error]` cannot be resolved
+pub struct A;
+
+/**
+ * # for example,
+ *
+ * time to introduce a link [error] //~ WARNING `[error]` cannot be resolved
+ */
+pub struct B;
+
+#[doc = "single line [error]"] //~ WARNING `[error]` cannot be resolved
+pub struct C;
+
+#[doc = "single line with \"escaping\" [error]"] //~ WARNING `[error]` cannot be resolved
+pub struct D;
+
+/// Item docs. //~ WARNING `[error]` cannot be resolved
+#[doc="Hello there!"]
+/// [error]
+pub struct E;
+
+///
+/// docs [error1] //~ WARNING `[error1]` cannot be resolved
+
+/// docs [error2] //~ WARNING `[error2]` cannot be resolved
+///
+pub struct F;

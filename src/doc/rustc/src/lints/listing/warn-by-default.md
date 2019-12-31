@@ -24,7 +24,7 @@ warning: attempt to add with overflow
 
 ## dead-code
 
-This lint detects detect unused, unexported items. Some
+This lint detects unused, unexported items. Some
 example code that triggers this lint:
 
 ```rust
@@ -44,7 +44,7 @@ warning: function is never used: `foo`
 
 ## deprecated
 
-This lint detects detects use of deprecated items. Some
+This lint detects use of deprecated items. Some
 example code that triggers this lint:
 
 ```rust
@@ -90,7 +90,7 @@ warning: floating-point literals cannot be used in patterns
 4 |         5.0 => {},
   |         ^^^
   |
-  = note: #[warn(illegal_floating_point_literal_pattern)] on by default
+  = note: `#[warn(illegal_floating_point_literal_pattern)]` on by default
   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
   = note: for more information, see issue #41620 <https://github.com/rust-lang/rust/issues/41620>
 ```
@@ -109,7 +109,7 @@ extern "C" {
 This will produce:
 
 ```text
-warning: found struct without foreign-function-safe representation annotation in foreign module, consider adding a #[repr(C)] attribute to the type
+warning: found struct without foreign-function-safe representation annotation in foreign module, consider adding a `#[repr(C)]` attribute to the type
  --> src/main.rs:2:20
   |
 2 |     static STATIC: String;
@@ -119,7 +119,7 @@ warning: found struct without foreign-function-safe representation annotation in
 
 ## late-bound-lifetime-arguments
 
-This lint detects detects generic lifetime arguments in path segments with
+This lint detects generic lifetime arguments in path segments with
 late bound lifetime parameters. Some example code that triggers this lint:
 
 ```rust
@@ -146,7 +146,7 @@ warning: cannot specify lifetime arguments explicitly if late bound lifetime par
 8 |     S.late::<'static>(&0, &0);
   |              ^^^^^^^
   |
-  = note: #[warn(late_bound_lifetime_arguments)] on by default
+  = note: `#[warn(late_bound_lifetime_arguments)]` on by default
   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
   = note: for more information, see issue #42868 <https://github.com/rust-lang/rust/issues/42868>
 ```
@@ -279,29 +279,9 @@ warning: functions generic over types must be mangled
 1 |   #[no_mangle]
   |   ------------ help: remove this attribute
 2 | / fn foo<T>(t: T) {
-3 | |     
+3 | |
 4 | | }
   | |_^
-  |
-```
-
-## overflowing-literals
-
-This lint detects literal out of range for its type. Some
-example code that triggers this lint:
-
-```rust
-let x: u8 = 1000;
-```
-
-This will produce:
-
-```text
-warning: literal out of range for u8
- --> src/main.rs:2:17
-  |
-2 |     let x: u8 = 1000;
-  |                 ^^^^
   |
 ```
 
@@ -327,61 +307,9 @@ warning: path statement with no effect
   |
 ```
 
-## patterns-in-fns-without-body
-
-This lint detects patterns in functions without body were that were
-previously erroneously allowed. Some example code that triggers this lint:
-
-```rust
-trait Trait {
-    fn foo(mut arg: u8);
-}
-```
-
-This will produce:
-
-```text
-warning: patterns aren't allowed in methods without bodies
- --> src/main.rs:2:12
-  |
-2 |     fn foo(mut arg: u8);
-  |            ^^^^^^^
-  |
-  = note: #[warn(patterns_in_fns_without_body)] on by default
-  = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
-  = note: for more information, see issue #35203 <https://github.com/rust-lang/rust/issues/35203>
-```
-
-To fix this, remove the pattern; it can be used in the implementation without
-being used in the definition. That is:
-
-```rust
-trait Trait {
-    fn foo(arg: u8);
-}
-
-impl Trait for i32 {
-    fn foo(mut arg: u8) {
-
-    }
-}
-```
-
-## plugin-as-library
-
-This lint detects when compiler plugins are used as ordinary library in
-non-plugin crate. Some example code that triggers this lint:
-
-```rust,ignore
-#![feature(plugin)]
-#![plugin(macro_crate_test)]
-
-extern crate macro_crate_test;
-```
-
 ## private-in-public
 
-This lint detects detect private items in public interfaces not caught by the old implementation. Some
+This lint detects private items in public interfaces not caught by the old implementation. Some
 example code that triggers this lint:
 
 ```rust,ignore
@@ -426,7 +354,7 @@ fn foo() {}
 This will produce:
 
 ```text
-warning: function is marked #[no_mangle], but not exported
+warning: function is marked `#[no_mangle]`, but not exported
  --> src/main.rs:2:1
   |
 2 | fn foo() {}
@@ -453,7 +381,7 @@ static X: i32 = 4;
 This will produce:
 
 ```text
-warning: static is marked #[no_mangle], but not exported
+warning: static is marked `#[no_mangle]`, but not exported
  --> src/main.rs:2:1
   |
 2 | static X: i32 = 4;
@@ -513,10 +441,10 @@ This will produce:
 warning: borrow of packed field requires unsafe function or block (error E0133)
   --> src/main.rs:11:13
    |
-11 |     let y = &x.data.0; 
+11 |     let y = &x.data.0;
    |             ^^^^^^^^^
    |
-   = note: #[warn(safe_packed_borrows)] on by default
+   = note: `#[warn(safe_packed_borrows)]` on by default
    = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in a future release!
    = note: for more information, see issue #46043 <https://github.com/rust-lang/rust/issues/46043>
 ```
@@ -549,18 +477,21 @@ This lint detects bounds in type aliases. These are not currently enforced.
 Some example code that triggers this lint:
 
 ```rust
+#[allow(dead_code)]
 type SendVec<T: Send> = Vec<T>;
 ```
 
 This will produce:
 
 ```text
-warning: type alias is never used: `SendVec`
- --> src/main.rs:1:1
+warning: bounds on generic parameters are not enforced in type aliases
+ --> src/lib.rs:2:17
   |
-1 | type SendVec<T: Send> = Vec<T>;
-  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2 | type SendVec<T: Send> = Vec<T>;
+  |                 ^^^^
   |
+  = note: `#[warn(type_alias_bounds)]` on by default
+  = help: the bound will not be checked when the type alias is used, and should be removed
 ```
 
 ## tyvar-behind-raw-pointer
@@ -584,7 +515,7 @@ warning: type annotations needed
 4 |     if data.is_null() {}
   |             ^^^^^^^
   |
-  = note: #[warn(tyvar_behind_raw_pointer)] on by default
+  = note: `#[warn(tyvar_behind_raw_pointer)]` on by default
   = warning: this was previously accepted by the compiler but is being phased out; it will become a hard error in the 2018 edition!
   = note: for more information, see issue #46906 <https://github.com/rust-lang/rust/issues/46906>
 ```
@@ -603,37 +534,13 @@ fn foo() {
 This will produce:
 
 ```text
-warning: function cannot return without recurring
+warning: function cannot return without recursing
  --> src/main.rs:1:1
   |
 1 | fn foo() {
-  | ^^^^^^^^ cannot return without recurring
+  | ^^^^^^^^ cannot return without recursing
 2 |     foo();
   |     ----- recursive call site
-  |
-```
-
-## unions-with-drop-fields
-
-This lint detects use of unions that contain fields with possibly non-trivial drop code. Some
-example code that triggers this lint:
-
-```rust
-#![feature(untagged_unions)]
-
-union U {
-    s: String,
-}
-```
-
-This will produce:
-
-```text
-warning: union contains a field with possibly non-trivial drop code, drop code of union fields is ignored when dropping the union
- --> src/main.rs:4:5
-  |
-4 |     s: String,
-  |     ^^^^^^^^^
   |
 ```
 
@@ -659,7 +566,7 @@ warning: unknown lint: `not_a_real_lint`
 
 ## unreachable-code
 
-This lint detects detects unreachable code paths. Some example code that
+This lint detects unreachable code paths. Some example code that
 triggers this lint:
 
 ```rust,no_run
@@ -681,7 +588,7 @@ warning: unreachable statement
 
 ## unreachable-patterns
 
-This lint detects detects unreachable patterns. Some
+This lint detects unreachable patterns. Some
 example code that triggers this lint:
 
 ```rust
@@ -716,11 +623,11 @@ annotations now.
 
 ## unused-allocation
 
-This lint detects detects unnecessary allocations that can be eliminated.
+This lint detects unnecessary allocations that can be eliminated.
 
 ## unused-assignments
 
-This lint detects detect assignments that will never be read. Some
+This lint detects assignments that will never be read. Some
 example code that triggers this lint:
 
 ```rust
@@ -741,23 +648,21 @@ warning: value assigned to `x` is never read
 
 ## unused-attributes
 
-This lint detects detects attributes that were not used by the compiler. Some
+This lint detects attributes that were not used by the compiler. Some
 example code that triggers this lint:
 
 ```rust
-#![feature(custom_attribute)]
-
-#![mutable_doc]
+#![macro_export]
 ```
 
 This will produce:
 
 ```text
 warning: unused attribute
- --> src/main.rs:4:1
+ --> src/main.rs:1:1
   |
-4 | #![mutable_doc]
-  | ^^^^^^^^^^^^^^^
+1 | #![macro_export]
+  | ^^^^^^^^^^^^^^^^
   |
 ```
 
@@ -785,7 +690,7 @@ warning: comparison is useless due to type limits
 
 ## unused-doc-comment
 
-This lint detects detects doc comments that aren't used by rustdoc. Some
+This lint detects doc comments that aren't used by rustdoc. Some
 example code that triggers this lint:
 
 ```rust
@@ -806,7 +711,7 @@ warning: doc comment not used by rustdoc
 
 ## unused-features
 
-This lint detects unused or unknown features found in crate-level #[feature] directives.
+This lint detects unused or unknown features found in crate-level `#[feature]` directives.
 To fix this, simply remove the feature flag.
 
 ## unused-imports
@@ -831,7 +736,7 @@ warning: unused import: `std::collections::HashMap`
 
 ## unused-macros
 
-This lint detects detects macros that were not used. Some example code that
+This lint detects macros that were not used. Some example code that
 triggers this lint:
 
 ```rust
@@ -858,7 +763,7 @@ warning: unused macro definition
 
 ## unused-must-use
 
-This lint detects unused result of a type flagged as #[must_use]. Some
+This lint detects unused result of a type flagged as `#[must_use]`. Some
 example code that triggers this lint:
 
 ```rust
@@ -874,7 +779,7 @@ fn main() {
 This will produce:
 
 ```text
-warning: unused `std::result::Result` which must be used
+warning: unused `std::result::Result` that must be used
  --> src/main.rs:6:5
   |
 6 |     returns_result();
@@ -884,7 +789,7 @@ warning: unused `std::result::Result` which must be used
 
 ## unused-mut
 
-This lint detects detect mut variables which don't need to be mutable. Some
+This lint detects mut variables which don't need to be mutable. Some
 example code that triggers this lint:
 
 ```rust
@@ -946,7 +851,7 @@ warning: unnecessary `unsafe` block
 
 ## unused-variables
 
-This lint detects detect variables which are not used in any way. Some
+This lint detects variables which are not used in any way. Some
 example code that triggers this lint:
 
 ```rust

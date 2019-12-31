@@ -1,25 +1,16 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Character conversions.
 
-use convert::TryFrom;
-use fmt;
-use mem::transmute;
-use str::FromStr;
+use crate::convert::TryFrom;
+use crate::fmt;
+use crate::mem::transmute;
+use crate::str::FromStr;
+
 use super::MAX;
 
 /// Converts a `u32` to a `char`.
 ///
 /// Note that all [`char`]s are valid [`u32`]s, and can be cast to one with
-/// [`as`]:
+/// `as`:
 ///
 /// ```
 /// let c = '💯';
@@ -34,7 +25,6 @@ use super::MAX;
 ///
 /// [`char`]: ../../std/primitive.char.html
 /// [`u32`]: ../../std/primitive.u32.html
-/// [`as`]: ../../book/first-edition/casting-between-types.html#as
 ///
 /// For an unsafe version of this function which ignores these checks, see
 /// [`from_u32_unchecked`].
@@ -71,7 +61,7 @@ pub fn from_u32(i: u32) -> Option<char> {
 /// Converts a `u32` to a `char`, ignoring validity.
 ///
 /// Note that all [`char`]s are valid [`u32`]s, and can be cast to one with
-/// [`as`]:
+/// `as`:
 ///
 /// ```
 /// let c = '💯';
@@ -86,7 +76,6 @@ pub fn from_u32(i: u32) -> Option<char> {
 ///
 /// [`char`]: ../../std/primitive.char.html
 /// [`u32`]: ../../std/primitive.u32.html
-/// [`as`]: ../../book/first-edition/casting-between-types.html#as
 ///
 /// # Safety
 ///
@@ -115,13 +104,24 @@ pub unsafe fn from_u32_unchecked(i: u32) -> char {
 
 #[stable(feature = "char_convert", since = "1.13.0")]
 impl From<char> for u32 {
+    /// Converts a [`char`] into a [`u32`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::mem;
+    ///
+    /// let c = 'c';
+    /// let u = u32::from(c);
+    /// assert!(4 == mem::size_of_val(&u))
+    /// ```
     #[inline]
     fn from(c: char) -> Self {
         c as u32
     }
 }
 
-/// Maps a byte in 0x00...0xFF to a `char` whose code point has the same value, in U+0000 to U+00FF.
+/// Maps a byte in 0x00..=0xFF to a `char` whose code point has the same value, in U+0000..=U+00FF.
 ///
 /// Unicode is designed such that this effectively decodes bytes
 /// with the character encoding that IANA calls ISO-8859-1.
@@ -141,12 +141,22 @@ impl From<char> for u32 {
 /// C0 and C1 control codes.
 #[stable(feature = "char_convert", since = "1.13.0")]
 impl From<u8> for char {
+    /// Converts a [`u8`] into a [`char`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::mem;
+    ///
+    /// let u = 32 as u8;
+    /// let c = char::from(u);
+    /// assert!(4 == mem::size_of_val(&c))
+    /// ```
     #[inline]
     fn from(i: u8) -> Self {
         i as char
     }
 }
-
 
 /// An error which can be returned when parsing a char.
 #[stable(feature = "char_from_str", since = "1.20.0")]
@@ -156,16 +166,16 @@ pub struct ParseCharError {
 }
 
 impl ParseCharError {
-    #[unstable(feature = "char_error_internals",
-               reason = "this method should not be available publicly",
-               issue = "0")]
+    #[unstable(
+        feature = "char_error_internals",
+        reason = "this method should not be available publicly",
+        issue = "none"
+    )]
     #[doc(hidden)]
     pub fn __description(&self) -> &str {
         match self.kind {
-            CharErrorKind::EmptyString => {
-                "cannot parse char from empty string"
-            },
-            CharErrorKind::TooManyChars => "too many characters in string"
+            CharErrorKind::EmptyString => "cannot parse char from empty string",
+            CharErrorKind::TooManyChars => "too many characters in string",
         }
     }
 }
@@ -178,11 +188,10 @@ enum CharErrorKind {
 
 #[stable(feature = "char_from_str", since = "1.20.0")]
 impl fmt::Display for ParseCharError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.__description().fmt(f)
     }
 }
-
 
 #[stable(feature = "char_from_str", since = "1.20.0")]
 impl FromStr for char {
@@ -192,19 +201,14 @@ impl FromStr for char {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let mut chars = s.chars();
         match (chars.next(), chars.next()) {
-            (None, _) => {
-                Err(ParseCharError { kind: CharErrorKind::EmptyString })
-            },
+            (None, _) => Err(ParseCharError { kind: CharErrorKind::EmptyString }),
             (Some(c), None) => Ok(c),
-            _ => {
-                Err(ParseCharError { kind: CharErrorKind::TooManyChars })
-            }
+            _ => Err(ParseCharError { kind: CharErrorKind::TooManyChars }),
         }
     }
 }
 
-
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
 impl TryFrom<u32> for char {
     type Error = CharTryFromError;
 
@@ -213,19 +217,20 @@ impl TryFrom<u32> for char {
         if (i > MAX as u32) || (i >= 0xD800 && i <= 0xDFFF) {
             Err(CharTryFromError(()))
         } else {
+            // SAFETY: checked that it's a legal unicode value
             Ok(unsafe { from_u32_unchecked(i) })
         }
     }
 }
 
 /// The error type returned when a conversion from u32 to char fails.
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct CharTryFromError(());
 
-#[unstable(feature = "try_from", issue = "33417")]
+#[stable(feature = "try_from", since = "1.34.0")]
 impl fmt::Display for CharTryFromError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         "converted integer out of range for `char`".fmt(f)
     }
 }
@@ -292,13 +297,8 @@ pub fn from_digit(num: u32, radix: u32) -> Option<char> {
     }
     if num < radix {
         let num = num as u8;
-        if num < 10 {
-            Some((b'0' + num) as char)
-        } else {
-            Some((b'a' + num - 10) as char)
-        }
+        if num < 10 { Some((b'0' + num) as char) } else { Some((b'a' + num - 10) as char) }
     } else {
         None
     }
 }
-

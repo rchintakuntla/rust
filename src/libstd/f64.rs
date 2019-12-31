@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! This module provides constants which are specific to the implementation
 //! of the `f64` floating point data type.
 //!
@@ -19,20 +9,20 @@
 #![allow(missing_docs)]
 
 #[cfg(not(test))]
-use intrinsics;
+use crate::intrinsics;
 #[cfg(not(test))]
-use sys::cmath;
+use crate::sys::cmath;
 
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use core::f64::{RADIX, MANTISSA_DIGITS, DIGITS, EPSILON};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use core::f64::{MIN_EXP, MAX_EXP, MIN_10_EXP};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use core::f64::{MAX_10_EXP, NAN, INFINITY, NEG_INFINITY};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use core::f64::{MIN, MIN_POSITIVE, MAX};
-#[stable(feature = "rust1", since = "1.0.0")]
 pub use core::f64::consts;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::f64::{DIGITS, EPSILON, MANTISSA_DIGITS, RADIX};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::f64::{INFINITY, MAX_10_EXP, NAN, NEG_INFINITY};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::f64::{MAX, MIN, MIN_POSITIVE};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use core::f64::{MAX_EXP, MIN_10_EXP, MIN_EXP};
 
 #[cfg(not(test))]
 #[lang = "f64_runtime"]
@@ -42,12 +32,15 @@ impl f64 {
     /// # Examples
     ///
     /// ```
-    /// let f = 3.99_f64;
+    /// let f = 3.7_f64;
     /// let g = 3.0_f64;
+    /// let h = -3.7_f64;
     ///
     /// assert_eq!(f.floor(), 3.0);
     /// assert_eq!(g.floor(), 3.0);
+    /// assert_eq!(h.floor(), -4.0);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn floor(self) -> f64 {
@@ -65,6 +58,7 @@ impl f64 {
     /// assert_eq!(f.ceil(), 4.0);
     /// assert_eq!(g.ceil(), 4.0);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn ceil(self) -> f64 {
@@ -83,6 +77,7 @@ impl f64 {
     /// assert_eq!(f.round(), 3.0);
     /// assert_eq!(g.round(), -3.0);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn round(self) -> f64 {
@@ -94,12 +89,15 @@ impl f64 {
     /// # Examples
     ///
     /// ```
-    /// let f = 3.3_f64;
-    /// let g = -3.7_f64;
+    /// let f = 3.7_f64;
+    /// let g = 3.0_f64;
+    /// let h = -3.7_f64;
     ///
     /// assert_eq!(f.trunc(), 3.0);
-    /// assert_eq!(g.trunc(), -3.0);
+    /// assert_eq!(g.trunc(), 3.0);
+    /// assert_eq!(h.trunc(), -3.0);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn trunc(self) -> f64 {
@@ -119,9 +117,12 @@ impl f64 {
     /// assert!(abs_difference_x < 1e-10);
     /// assert!(abs_difference_y < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn fract(self) -> f64 { self - self.trunc() }
+    pub fn fract(self) -> f64 {
+        self - self.trunc()
+    }
 
     /// Computes the absolute value of `self`. Returns `NAN` if the
     /// number is `NAN`.
@@ -142,6 +143,7 @@ impl f64 {
     ///
     /// assert!(f64::NAN.abs().is_nan());
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn abs(self) -> f64 {
@@ -166,14 +168,39 @@ impl f64 {
     ///
     /// assert!(f64::NAN.signum().is_nan());
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn signum(self) -> f64 {
-        if self.is_nan() {
-            NAN
-        } else {
-            unsafe { intrinsics::copysignf64(1.0, self) }
-        }
+        if self.is_nan() { NAN } else { 1.0_f64.copysign(self) }
+    }
+
+    /// Returns a number composed of the magnitude of `self` and the sign of
+    /// `sign`.
+    ///
+    /// Equal to `self` if the sign of `self` and `sign` are the same, otherwise
+    /// equal to `-self`. If `self` is a `NAN`, then a `NAN` with the sign of
+    /// `sign` is returned.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::f64;
+    ///
+    /// let f = 3.5_f64;
+    ///
+    /// assert_eq!(f.copysign(0.42), 3.5_f64);
+    /// assert_eq!(f.copysign(-0.42), -3.5_f64);
+    /// assert_eq!((-f).copysign(0.42), 3.5_f64);
+    /// assert_eq!((-f).copysign(-0.42), -3.5_f64);
+    ///
+    /// assert!(f64::NAN.copysign(1.0).is_nan());
+    /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[stable(feature = "copysign", since = "1.35.0")]
+    #[inline]
+    pub fn copysign(self, sign: f64) -> f64 {
+        unsafe { intrinsics::copysignf64(self, sign) }
     }
 
     /// Fused multiply-add. Computes `(self * a) + b` with only one rounding
@@ -190,77 +217,74 @@ impl f64 {
     /// let b = 60.0_f64;
     ///
     /// // 100.0
-    /// let abs_difference = (m.mul_add(x, b) - (m*x + b)).abs();
+    /// let abs_difference = (m.mul_add(x, b) - ((m * x) + b)).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn mul_add(self, a: f64, b: f64) -> f64 {
         unsafe { intrinsics::fmaf64(self, a, b) }
     }
 
-    /// Calculates Euclidean division, the matching method for `mod_euc`.
+    /// Calculates Euclidean division, the matching method for `rem_euclid`.
     ///
     /// This computes the integer `n` such that
-    /// `self = n * rhs + self.mod_euc(rhs)`.
+    /// `self = n * rhs + self.rem_euclid(rhs)`.
     /// In other words, the result is `self / rhs` rounded to the integer `n`
     /// such that `self >= n * rhs`.
     ///
     /// # Examples
     ///
     /// ```
-    /// #![feature(euclidean_division)]
     /// let a: f64 = 7.0;
     /// let b = 4.0;
-    /// assert_eq!(a.div_euc(b), 1.0); // 7.0 > 4.0 * 1.0
-    /// assert_eq!((-a).div_euc(b), -2.0); // -7.0 >= 4.0 * -2.0
-    /// assert_eq!(a.div_euc(-b), -1.0); // 7.0 >= -4.0 * -1.0
-    /// assert_eq!((-a).div_euc(-b), 2.0); // -7.0 >= -4.0 * 2.0
+    /// assert_eq!(a.div_euclid(b), 1.0); // 7.0 > 4.0 * 1.0
+    /// assert_eq!((-a).div_euclid(b), -2.0); // -7.0 >= 4.0 * -2.0
+    /// assert_eq!(a.div_euclid(-b), -1.0); // 7.0 >= -4.0 * -1.0
+    /// assert_eq!((-a).div_euclid(-b), 2.0); // -7.0 >= -4.0 * 2.0
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[inline]
-    #[unstable(feature = "euclidean_division", issue = "49048")]
-    pub fn div_euc(self, rhs: f64) -> f64 {
+    #[stable(feature = "euclidean_division", since = "1.38.0")]
+    pub fn div_euclid(self, rhs: f64) -> f64 {
         let q = (self / rhs).trunc();
         if self % rhs < 0.0 {
-            return if rhs > 0.0 { q - 1.0 } else { q + 1.0 }
+            return if rhs > 0.0 { q - 1.0 } else { q + 1.0 };
         }
         q
     }
 
-    /// Calculates the Euclidean modulo (self mod rhs), which is never negative.
+    /// Calculates the least nonnegative remainder of `self (mod rhs)`.
     ///
     /// In particular, the return value `r` satisfies `0.0 <= r < rhs.abs()` in
-    /// most cases.  However, due to a floating point round-off error it can
+    /// most cases. However, due to a floating point round-off error it can
     /// result in `r == rhs.abs()`, violating the mathematical definition, if
     /// `self` is much smaller than `rhs.abs()` in magnitude and `self < 0.0`.
     /// This result is not an element of the function's codomain, but it is the
     /// closest floating point number in the real numbers and thus fulfills the
-    /// property `self == self.div_euc(rhs) * rhs + self.mod_euc(rhs)`
+    /// property `self == self.div_euclid(rhs) * rhs + self.rem_euclid(rhs)`
     /// approximatively.
     ///
     /// # Examples
     ///
     /// ```
-    /// #![feature(euclidean_division)]
     /// let a: f64 = 7.0;
     /// let b = 4.0;
-    /// assert_eq!(a.mod_euc(b), 3.0);
-    /// assert_eq!((-a).mod_euc(b), 1.0);
-    /// assert_eq!(a.mod_euc(-b), 3.0);
-    /// assert_eq!((-a).mod_euc(-b), 1.0);
+    /// assert_eq!(a.rem_euclid(b), 3.0);
+    /// assert_eq!((-a).rem_euclid(b), 1.0);
+    /// assert_eq!(a.rem_euclid(-b), 3.0);
+    /// assert_eq!((-a).rem_euclid(-b), 1.0);
     /// // limitation due to round-off error
-    /// assert!((-std::f64::EPSILON).mod_euc(3.0) != 0.0);
+    /// assert!((-std::f64::EPSILON).rem_euclid(3.0) != 0.0);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[inline]
-    #[unstable(feature = "euclidean_division", issue = "49048")]
-    pub fn mod_euc(self, rhs: f64) -> f64 {
+    #[stable(feature = "euclidean_division", since = "1.38.0")]
+    pub fn rem_euclid(self, rhs: f64) -> f64 {
         let r = self % rhs;
-        if r < 0.0 {
-            r + rhs.abs()
-        } else {
-            r
-        }
+        if r < 0.0 { r + rhs.abs() } else { r }
     }
 
     /// Raises a number to an integer power.
@@ -271,10 +295,11 @@ impl f64 {
     ///
     /// ```
     /// let x = 2.0_f64;
-    /// let abs_difference = (x.powi(2) - x*x).abs();
+    /// let abs_difference = (x.powi(2) - (x * x)).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn powi(self, n: i32) -> f64 {
@@ -287,10 +312,11 @@ impl f64 {
     ///
     /// ```
     /// let x = 2.0_f64;
-    /// let abs_difference = (x.powf(2.0) - x*x).abs();
+    /// let abs_difference = (x.powf(2.0) - (x * x)).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn powf(self, n: f64) -> f64 {
@@ -312,14 +338,11 @@ impl f64 {
     /// assert!(abs_difference < 1e-10);
     /// assert!(negative.sqrt().is_nan());
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn sqrt(self) -> f64 {
-        if self < 0.0 {
-            NAN
-        } else {
-            unsafe { intrinsics::sqrtf64(self) }
-        }
+        if self < 0.0 { NAN } else { unsafe { intrinsics::sqrtf64(self) } }
     }
 
     /// Returns `e^(self)`, (the exponential function).
@@ -336,6 +359,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn exp(self) -> f64 {
@@ -354,6 +378,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn exp2(self) -> f64 {
@@ -374,10 +399,11 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn ln(self) -> f64 {
-        self.log_wrapper(|n| { unsafe { intrinsics::logf64(n) } })
+        self.log_wrapper(|n| unsafe { intrinsics::logf64(n) })
     }
 
     /// Returns the logarithm of the number with respect to an arbitrary base.
@@ -389,35 +415,39 @@ impl f64 {
     /// # Examples
     ///
     /// ```
-    /// let five = 5.0_f64;
+    /// let twenty_five = 25.0_f64;
     ///
-    /// // log5(5) - 1 == 0
-    /// let abs_difference = (five.log(5.0) - 1.0).abs();
+    /// // log5(25) - 2 == 0
+    /// let abs_difference = (twenty_five.log(5.0) - 2.0).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    pub fn log(self, base: f64) -> f64 { self.ln() / base.ln() }
+    pub fn log(self, base: f64) -> f64 {
+        self.ln() / base.ln()
+    }
 
     /// Returns the base 2 logarithm of the number.
     ///
     /// # Examples
     ///
     /// ```
-    /// let two = 2.0_f64;
+    /// let four = 4.0_f64;
     ///
-    /// // log2(2) - 1 == 0
-    /// let abs_difference = (two.log2() - 1.0).abs();
+    /// // log2(4) - 2 == 0
+    /// let abs_difference = (four.log2() - 2.0).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn log2(self) -> f64 {
         self.log_wrapper(|n| {
             #[cfg(target_os = "android")]
-            return ::sys::android::log2f64(n);
+            return crate::sys::android::log2f64(n);
             #[cfg(not(target_os = "android"))]
             return unsafe { intrinsics::log2f64(n) };
         })
@@ -428,17 +458,18 @@ impl f64 {
     /// # Examples
     ///
     /// ```
-    /// let ten = 10.0_f64;
+    /// let hundred = 100.0_f64;
     ///
-    /// // log10(10) - 1 == 0
-    /// let abs_difference = (ten.log10() - 1.0).abs();
+    /// // log10(100) - 2 == 0
+    /// let abs_difference = (hundred.log10() - 2.0).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn log10(self) -> f64 {
-        self.log_wrapper(|n| { unsafe { intrinsics::log10f64(n) } })
+        self.log_wrapper(|n| unsafe { intrinsics::log10f64(n) })
     }
 
     /// The positive difference of two numbers.
@@ -458,18 +489,22 @@ impl f64 {
     /// assert!(abs_difference_x < 1e-10);
     /// assert!(abs_difference_y < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
-    #[rustc_deprecated(since = "1.10.0",
-                       reason = "you probably meant `(self - other).abs()`: \
-                                 this operation is `(self - other).max(0.0)` (also \
-                                 known as `fdim` in C). If you truly need the positive \
-                                 difference, consider using that expression or the C function \
-                                 `fdim`, depending on how you wish to handle NaN (please consider \
-                                 filing an issue describing your use-case too).")]
-     pub fn abs_sub(self, other: f64) -> f64 {
-         unsafe { cmath::fdim(self, other) }
-     }
+    #[rustc_deprecated(
+        since = "1.10.0",
+        reason = "you probably meant `(self - other).abs()`: \
+                  this operation is `(self - other).max(0.0)` \
+                  except that `abs_sub` also propagates NaNs (also \
+                  known as `fdim` in C). If you truly need the positive \
+                  difference, consider using that expression or the C function \
+                  `fdim`, depending on how you wish to handle NaN (please consider \
+                  filing an issue describing your use-case too)."
+    )]
+    pub fn abs_sub(self, other: f64) -> f64 {
+        unsafe { cmath::fdim(self, other) }
+    }
 
     /// Takes the cubic root of a number.
     ///
@@ -483,6 +518,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn cbrt(self) -> f64 {
@@ -503,6 +539,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn hypot(self, other: f64) -> f64 {
@@ -516,12 +553,13 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let x = f64::consts::PI/2.0;
+    /// let x = f64::consts::FRAC_PI_2;
     ///
     /// let abs_difference = (x.sin() - 1.0).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn sin(self) -> f64 {
@@ -535,12 +573,13 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let x = 2.0*f64::consts::PI;
+    /// let x = 2.0 * f64::consts::PI;
     ///
     /// let abs_difference = (x.cos() - 1.0).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn cos(self) -> f64 {
@@ -554,11 +593,12 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let x = f64::consts::PI/4.0;
+    /// let x = f64::consts::FRAC_PI_4;
     /// let abs_difference = (x.tan() - 1.0).abs();
     ///
     /// assert!(abs_difference < 1e-14);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn tan(self) -> f64 {
@@ -574,13 +614,14 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let f = f64::consts::PI / 2.0;
+    /// let f = f64::consts::FRAC_PI_2;
     ///
     /// // asin(sin(pi/2))
-    /// let abs_difference = (f.sin().asin() - f64::consts::PI / 2.0).abs();
+    /// let abs_difference = (f.sin().asin() - f64::consts::FRAC_PI_2).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn asin(self) -> f64 {
@@ -596,13 +637,14 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let f = f64::consts::PI / 4.0;
+    /// let f = f64::consts::FRAC_PI_4;
     ///
     /// // acos(cos(pi/4))
-    /// let abs_difference = (f.cos().acos() - f64::consts::PI / 4.0).abs();
+    /// let abs_difference = (f.cos().acos() - f64::consts::FRAC_PI_4).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn acos(self) -> f64 {
@@ -622,6 +664,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn atan(self) -> f64 {
@@ -640,7 +683,6 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let pi = f64::consts::PI;
     /// // Positive angles measured counter-clockwise
     /// // from positive x axis
     /// // -pi/4 radians (45 deg clockwise)
@@ -651,12 +693,13 @@ impl f64 {
     /// let x2 = -3.0_f64;
     /// let y2 = 3.0_f64;
     ///
-    /// let abs_difference_1 = (y1.atan2(x1) - (-pi/4.0)).abs();
-    /// let abs_difference_2 = (y2.atan2(x2) - 3.0*pi/4.0).abs();
+    /// let abs_difference_1 = (y1.atan2(x1) - (-f64::consts::FRAC_PI_4)).abs();
+    /// let abs_difference_2 = (y2.atan2(x2) - (3.0 * f64::consts::FRAC_PI_4)).abs();
     ///
     /// assert!(abs_difference_1 < 1e-10);
     /// assert!(abs_difference_2 < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn atan2(self, other: f64) -> f64 {
@@ -671,7 +714,7 @@ impl f64 {
     /// ```
     /// use std::f64;
     ///
-    /// let x = f64::consts::PI/4.0;
+    /// let x = f64::consts::FRAC_PI_4;
     /// let f = x.sin_cos();
     ///
     /// let abs_difference_0 = (f.0 - x.sin()).abs();
@@ -699,6 +742,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn exp_m1(self) -> f64 {
@@ -720,6 +764,7 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn ln_1p(self) -> f64 {
@@ -738,11 +783,12 @@ impl f64 {
     ///
     /// let f = x.sinh();
     /// // Solving sinh() at 1 gives `(e^2-1)/(2e)`
-    /// let g = (e*e - 1.0)/(2.0*e);
+    /// let g = ((e * e) - 1.0) / (2.0 * e);
     /// let abs_difference = (f - g).abs();
     ///
     /// assert!(abs_difference < 1e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn sinh(self) -> f64 {
@@ -760,12 +806,13 @@ impl f64 {
     /// let x = 1.0_f64;
     /// let f = x.cosh();
     /// // Solving cosh() at 1 gives this result
-    /// let g = (e*e + 1.0)/(2.0*e);
+    /// let g = ((e * e) + 1.0) / (2.0 * e);
     /// let abs_difference = (f - g).abs();
     ///
     /// // Same result
     /// assert!(abs_difference < 1.0e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn cosh(self) -> f64 {
@@ -784,11 +831,12 @@ impl f64 {
     ///
     /// let f = x.tanh();
     /// // Solving tanh() at 1 gives `(1 - e^(-2))/(1 + e^(-2))`
-    /// let g = (1.0 - e.powi(-2))/(1.0 + e.powi(-2));
+    /// let g = (1.0 - e.powi(-2)) / (1.0 + e.powi(-2));
     /// let abs_difference = (f - g).abs();
     ///
     /// assert!(abs_difference < 1.0e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn tanh(self) -> f64 {
@@ -807,13 +855,14 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1.0e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn asinh(self) -> f64 {
         if self == NEG_INFINITY {
             NEG_INFINITY
         } else {
-            (self + ((self * self) + 1.0).sqrt()).ln()
+            (self + ((self * self) + 1.0).sqrt()).ln().copysign(self)
         }
     }
 
@@ -829,13 +878,11 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1.0e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn acosh(self) -> f64 {
-        match self {
-            x if x < 1.0 => NAN,
-            x => (x + ((x * x) - 1.0).sqrt()).ln(),
-        }
+        if self < 1.0 { NAN } else { (self + ((self * self) - 1.0).sqrt()).ln() }
     }
 
     /// Inverse hyperbolic tangent function.
@@ -852,14 +899,51 @@ impl f64 {
     ///
     /// assert!(abs_difference < 1.0e-10);
     /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
     #[stable(feature = "rust1", since = "1.0.0")]
     #[inline]
     pub fn atanh(self) -> f64 {
         0.5 * ((2.0 * self) / (1.0 - self)).ln_1p()
     }
 
+    /// Restrict a value to a certain interval unless it is NaN.
+    ///
+    /// Returns `max` if `self` is greater than `max`, and `min` if `self` is
+    /// less than `min`. Otherwise this returns `self`.
+    ///
+    /// Not that this function returns NaN if the initial value was NaN as
+    /// well.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `min > max`, `min` is NaN, or `max` is NaN.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// #![feature(clamp)]
+    /// assert!((-3.0f64).clamp(-2.0, 1.0) == -2.0);
+    /// assert!((0.0f64).clamp(-2.0, 1.0) == 0.0);
+    /// assert!((2.0f64).clamp(-2.0, 1.0) == 1.0);
+    /// assert!((std::f64::NAN).clamp(-2.0, 1.0).is_nan());
+    /// ```
+    #[must_use = "method returns a new number and does not mutate the original value"]
+    #[unstable(feature = "clamp", issue = "44095")]
+    #[inline]
+    pub fn clamp(self, min: f64, max: f64) -> f64 {
+        assert!(min <= max);
+        let mut x = self;
+        if x < min {
+            x = min;
+        }
+        if x > max {
+            x = max;
+        }
+        x
+    }
+
     // Solaris/Illumos requires a wrapper around log, log2, and log10 functions
-    // because of their non-standard behavior (e.g. log(-n) returns -Inf instead
+    // because of their non-standard behavior (e.g., log(-n) returns -Inf instead
     // of expected NaN).
     fn log_wrapper<F: Fn(f64) -> f64>(self, log_fn: F) -> f64 {
         if !cfg!(target_os = "solaris") {
@@ -886,10 +970,10 @@ impl f64 {
 
 #[cfg(test)]
 mod tests {
-    use f64;
-    use f64::*;
-    use num::*;
-    use num::FpCategory as Fp;
+    use crate::f64;
+    use crate::f64::*;
+    use crate::num::FpCategory as Fp;
+    use crate::num::*;
 
     #[test]
     fn test_num_f64() {
@@ -1136,7 +1220,7 @@ mod tests {
         assert_eq!((-0f64).abs(), 0f64);
         assert_eq!((-1f64).abs(), 1f64);
         assert_eq!(NEG_INFINITY.abs(), INFINITY);
-        assert_eq!((1f64/NEG_INFINITY).abs(), 0f64);
+        assert_eq!((1f64 / NEG_INFINITY).abs(), 0f64);
         assert!(NAN.abs().is_nan());
     }
 
@@ -1148,7 +1232,7 @@ mod tests {
         assert_eq!((-0f64).signum(), -1f64);
         assert_eq!((-1f64).signum(), -1f64);
         assert_eq!(NEG_INFINITY.signum(), -1f64);
-        assert_eq!((1f64/NEG_INFINITY).signum(), -1f64);
+        assert_eq!((1f64 / NEG_INFINITY).signum(), -1f64);
         assert!(NAN.signum().is_nan());
     }
 
@@ -1160,7 +1244,7 @@ mod tests {
         assert!(!(-0f64).is_sign_positive());
         assert!(!(-1f64).is_sign_positive());
         assert!(!NEG_INFINITY.is_sign_positive());
-        assert!(!(1f64/NEG_INFINITY).is_sign_positive());
+        assert!(!(1f64 / NEG_INFINITY).is_sign_positive());
         assert!(NAN.is_sign_positive());
         assert!(!(-NAN).is_sign_positive());
     }
@@ -1173,7 +1257,7 @@ mod tests {
         assert!((-0f64).is_sign_negative());
         assert!((-1f64).is_sign_negative());
         assert!(NEG_INFINITY.is_sign_negative());
-        assert!((1f64/NEG_INFINITY).is_sign_negative());
+        assert!((1f64 / NEG_INFINITY).is_sign_negative());
         assert!(!NAN.is_sign_negative());
         assert!((-NAN).is_sign_negative());
     }
@@ -1382,6 +1466,8 @@ mod tests {
         assert_eq!(inf.asinh(), inf);
         assert_eq!(neg_inf.asinh(), neg_inf);
         assert!(nan.asinh().is_nan());
+        assert!((-0.0f64).asinh().is_sign_negative());
+        // issue 63271
         assert_approx_eq!(2.0f64.asinh(), 1.443635475178810342493276740273105f64);
         assert_approx_eq!((-2.0f64).asinh(), -1.443635475178810342493276740273105f64);
     }
@@ -1476,5 +1562,23 @@ mod tests {
 
         assert_eq!(f64::from_bits(masked_nan1).to_bits(), masked_nan1);
         assert_eq!(f64::from_bits(masked_nan2).to_bits(), masked_nan2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clamp_min_greater_than_max() {
+        let _ = 1.0f64.clamp(3.0, 1.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clamp_min_is_nan() {
+        let _ = 1.0f64.clamp(NAN, 1.0);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_clamp_max_is_nan() {
+        let _ = 1.0f64.clamp(3.0, NAN);
     }
 }

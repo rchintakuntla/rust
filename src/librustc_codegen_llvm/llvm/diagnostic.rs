@@ -1,20 +1,10 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! LLVM diagnostic reports.
 
-pub use self::OptimizationDiagnosticKind::*;
 pub use self::Diagnostic::*;
+pub use self::OptimizationDiagnosticKind::*;
 
+use crate::value::Value;
 use libc::c_uint;
-use value::Value;
 
 use super::{DiagnosticInfo, Twine};
 
@@ -53,31 +43,33 @@ pub struct OptimizationDiagnostic<'ll> {
 }
 
 impl OptimizationDiagnostic<'ll> {
-    unsafe fn unpack(
-        kind: OptimizationDiagnosticKind,
-        di: &'ll DiagnosticInfo,
-    ) -> Self {
+    unsafe fn unpack(kind: OptimizationDiagnosticKind, di: &'ll DiagnosticInfo) -> Self {
         let mut function = None;
         let mut line = 0;
         let mut column = 0;
 
         let mut message = None;
         let mut filename = None;
-        let pass_name = super::build_string(|pass_name|
-            message = super::build_string(|message|
-                filename = super::build_string(|filename|
-                    super::LLVMRustUnpackOptimizationDiagnostic(di,
-                                                                pass_name,
-                                                                &mut function,
-                                                                &mut line,
-                                                                &mut column,
-                                                                filename,
-                                                                message)
-                ).ok()
-            ).ok()
-        ).ok();
+        let pass_name = super::build_string(|pass_name| {
+            message = super::build_string(|message| {
+                filename = super::build_string(|filename| {
+                    super::LLVMRustUnpackOptimizationDiagnostic(
+                        di,
+                        pass_name,
+                        &mut function,
+                        &mut line,
+                        &mut column,
+                        filename,
+                        message,
+                    )
+                })
+                .ok()
+            })
+            .ok()
+        })
+        .ok();
 
-        let mut filename = filename.unwrap_or(String::new());
+        let mut filename = filename.unwrap_or_default();
         if filename.is_empty() {
             filename.push_str("<unknown file>");
         }
@@ -89,7 +81,7 @@ impl OptimizationDiagnostic<'ll> {
             line,
             column,
             filename,
-            message: message.expect("got a non-UTF8 OptimizationDiagnostic message from LLVM")
+            message: message.expect("got a non-UTF8 OptimizationDiagnostic message from LLVM"),
         }
     }
 }
@@ -98,7 +90,7 @@ impl OptimizationDiagnostic<'ll> {
 pub struct InlineAsmDiagnostic<'ll> {
     pub cookie: c_uint,
     pub message: &'ll Twine,
-    pub instruction: &'ll Value,
+    pub instruction: Option<&'ll Value>,
 }
 
 impl InlineAsmDiagnostic<'ll> {
@@ -107,18 +99,9 @@ impl InlineAsmDiagnostic<'ll> {
         let mut message = None;
         let mut instruction = None;
 
-        super::LLVMRustUnpackInlineAsmDiagnostic(
-            di,
-            &mut cookie,
-            &mut message,
-            &mut instruction,
-        );
+        super::LLVMRustUnpackInlineAsmDiagnostic(di, &mut cookie, &mut message, &mut instruction);
 
-        InlineAsmDiagnostic {
-            cookie,
-            message: message.unwrap(),
-            instruction: instruction.unwrap(),
-        }
+        InlineAsmDiagnostic { cookie, message: message.unwrap(), instruction }
     }
 }
 
@@ -166,12 +149,8 @@ impl Diagnostic<'ll> {
                 Optimization(OptimizationDiagnostic::unpack(OptimizationFailure, di))
             }
 
-            Dk::PGOProfile => {
-                PGO(di)
-            }
-            Dk::Linker => {
-                Linker(di)
-            }
+            Dk::PGOProfile => PGO(di),
+            Dk::Linker => Linker(di),
 
             _ => UnknownDiagnostic(di),
         }

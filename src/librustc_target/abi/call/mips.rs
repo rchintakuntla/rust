@@ -1,18 +1,10 @@
-// Copyright 2012-2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+use crate::abi::call::{ArgAbi, FnAbi, Reg, Uniform};
+use crate::abi::{HasDataLayout, LayoutOf, Size, TyLayoutMethods};
 
-use abi::call::{ArgType, FnType, Reg, Uniform};
-use abi::{HasDataLayout, LayoutOf, Size, TyLayoutMethods};
-
-fn classify_ret_ty<'a, Ty, C>(cx: C, ret: &mut ArgType<Ty>, offset: &mut Size)
-    where Ty: TyLayoutMethods<'a, C>, C: LayoutOf<Ty = Ty> + HasDataLayout
+fn classify_ret<'a, Ty, C>(cx: &C, ret: &mut ArgAbi<'_, Ty>, offset: &mut Size)
+where
+    Ty: TyLayoutMethods<'a, C>,
+    C: LayoutOf<Ty = Ty> + HasDataLayout,
 {
     if !ret.layout.is_aggregate() {
         ret.extend_integer_width_to(32);
@@ -22,38 +14,41 @@ fn classify_ret_ty<'a, Ty, C>(cx: C, ret: &mut ArgType<Ty>, offset: &mut Size)
     }
 }
 
-fn classify_arg_ty<'a, Ty, C>(cx: C, arg: &mut ArgType<Ty>, offset: &mut Size)
-    where Ty: TyLayoutMethods<'a, C>, C: LayoutOf<Ty = Ty> + HasDataLayout
+fn classify_arg<'a, Ty, C>(cx: &C, arg: &mut ArgAbi<'_, Ty>, offset: &mut Size)
+where
+    Ty: TyLayoutMethods<'a, C>,
+    C: LayoutOf<Ty = Ty> + HasDataLayout,
 {
     let dl = cx.data_layout();
     let size = arg.layout.size;
-    let align = arg.layout.align.max(dl.i32_align).min(dl.i64_align);
+    let align = arg.layout.align.max(dl.i32_align).min(dl.i64_align).abi;
 
     if arg.layout.is_aggregate() {
-        arg.cast_to(Uniform {
-            unit: Reg::i32(),
-            total: size
-        });
-        if !offset.is_abi_aligned(align) {
+        arg.cast_to(Uniform { unit: Reg::i32(), total: size });
+        if !offset.is_aligned(align) {
             arg.pad_with(Reg::i32());
         }
     } else {
         arg.extend_integer_width_to(32);
     }
 
-    *offset = offset.abi_align(align) + size.abi_align(align);
+    *offset = offset.align_to(align) + size.align_to(align);
 }
 
-pub fn compute_abi_info<'a, Ty, C>(cx: C, fty: &mut FnType<Ty>)
-    where Ty: TyLayoutMethods<'a, C>, C: LayoutOf<Ty = Ty> + HasDataLayout
+pub fn compute_abi_info<'a, Ty, C>(cx: &C, fn_abi: &mut FnAbi<'_, Ty>)
+where
+    Ty: TyLayoutMethods<'a, C>,
+    C: LayoutOf<Ty = Ty> + HasDataLayout,
 {
     let mut offset = Size::ZERO;
-    if !fty.ret.is_ignore() {
-        classify_ret_ty(cx, &mut fty.ret, &mut offset);
+    if !fn_abi.ret.is_ignore() {
+        classify_ret(cx, &mut fn_abi.ret, &mut offset);
     }
 
-    for arg in &mut fty.args {
-        if arg.is_ignore() { continue; }
-        classify_arg_ty(cx, arg, &mut offset);
+    for arg in &mut fn_abi.args {
+        if arg.is_ignore() {
+            continue;
+        }
+        classify_arg(cx, arg, &mut offset);
     }
 }

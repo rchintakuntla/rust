@@ -1,13 +1,3 @@
-# Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-# file at the top-level directory of this distribution and at
-# http://rust-lang.org/COPYRIGHT.
-#
-# Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-# http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-# <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-# option. This file may not be copied, modified, or distributed
-# except according to those terms.
-
 import sys
 import os
 from os import listdir
@@ -17,8 +7,8 @@ from subprocess import PIPE, Popen
 
 # This is a whitelist of files which are stable crates or simply are not crates,
 # we don't check for the instability of these crates as they're all stable!
-STABLE_CRATES = ['std', 'core', 'proc_macro', 'rsbegin.o', 'rsend.o', 'dllcrt2.o', 'crt2.o',
-                 'clang_rt']
+STABLE_CRATES = ['std', 'alloc', 'core', 'proc_macro',
+                 'rsbegin.o', 'rsend.o', 'dllcrt2.o', 'crt2.o', 'clang_rt']
 
 
 def convert_to_string(s):
@@ -43,7 +33,7 @@ def check_lib(lib):
     print('verifying if {} is an unstable crate'.format(lib['name']))
     stdout, stderr = exec_command([os.environ['RUSTC'], '-', '--crate-type', 'rlib',
                                    '--extern', '{}={}'.format(lib['name'], lib['path'])],
-                                  to_input='extern crate {};'.format(lib['name']))
+                                  to_input=('extern crate {};'.format(lib['name'])).encode('utf-8'))
     if not 'use of unstable library feature' in '{}{}'.format(stdout, stderr):
         print('crate {} "{}" is not unstable'.format(lib['name'], lib['path']))
         print('{}{}'.format(stdout, stderr))

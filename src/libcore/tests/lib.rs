@@ -1,55 +1,53 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
+#![feature(bool_to_option)]
+#![feature(bound_cloned)]
 #![feature(box_syntax)]
 #![feature(cell_update)]
 #![feature(core_private_bignum)]
 #![feature(core_private_diy_float)]
+#![feature(debug_map_key_value)]
 #![feature(dec2flt)]
-#![feature(euclidean_division)]
 #![feature(exact_size_is_empty)]
 #![feature(fixed_size_array)]
 #![feature(flt2dec)]
 #![feature(fmt_internals)]
 #![feature(hashmap_internals)]
+#![feature(is_sorted)]
+#![feature(iter_once_with)]
 #![feature(pattern)]
 #![feature(range_is_empty)]
 #![feature(raw)]
-#![feature(refcell_map_split)]
-#![feature(refcell_replace_swap)]
+#![feature(saturating_neg)]
 #![feature(slice_patterns)]
 #![feature(sort_internals)]
+#![feature(slice_partition_at_index)]
 #![feature(specialization)]
 #![feature(step_trait)]
 #![feature(str_internals)]
 #![feature(test)]
 #![feature(trusted_len)]
-#![feature(try_from)]
 #![feature(try_trait)]
-#![feature(exact_chunks)]
-#![feature(slice_align_to)]
-#![feature(align_offset)]
-#![feature(reverse_bits)]
-#![feature(iterator_find_map)]
 #![feature(inner_deref)]
 #![feature(slice_internals)]
-#![feature(option_replace)]
+#![feature(slice_partition_dedup)]
+#![feature(int_error_matching)]
+#![feature(const_fn)]
+#![feature(array_value_iter)]
+#![feature(iter_partition_in_place)]
+#![feature(iter_is_partitioned)]
+#![feature(iter_order_by)]
+#![feature(cmp_min_max_by)]
+#![feature(slice_from_raw_parts)]
+#![feature(const_slice_from_raw_parts)]
+#![feature(const_raw_ptr_deref)]
 
-extern crate core;
 extern crate test;
-extern crate rand;
 
+mod alloc;
 mod any;
 mod array;
 mod ascii;
 mod atomic;
+mod bool;
 mod cell;
 mod char;
 mod clone;

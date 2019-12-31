@@ -1,20 +1,10 @@
-// Copyright 2016 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use infer::canonical::{Canonical, Canonicalized, CanonicalizedQueryResult, QueryResult};
+use crate::infer::canonical::{Canonicalized, CanonicalizedQueryResponse};
+use crate::traits::query::Fallible;
+use crate::ty::fold::TypeFoldable;
+use crate::ty::{self, Lift, ParamEnvAnd, Ty, TyCtxt};
 use std::fmt;
-use traits::query::Fallible;
-use ty::fold::TypeFoldable;
-use ty::{self, Lift, ParamEnvAnd, Ty, TyCtxt};
 
-#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, HashStable, TypeFoldable, Lift)]
 pub struct Normalize<T> {
     pub value: T,
 }
@@ -28,134 +18,63 @@ where
     }
 }
 
-impl<'gcx: 'tcx, 'tcx, T> super::QueryTypeOp<'gcx, 'tcx> for Normalize<T>
+impl<'tcx, T> super::QueryTypeOp<'tcx> for Normalize<T>
 where
-    T: Normalizable<'gcx, 'tcx>,
+    T: Normalizable<'tcx> + 'tcx,
 {
-    type QueryResult = T;
+    type QueryResponse = T;
 
-    fn try_fast_path(_tcx: TyCtxt<'_, 'gcx, 'tcx>, key: &ParamEnvAnd<'tcx, Self>) -> Option<T> {
-        if !key.value.value.has_projections() {
-            Some(key.value.value)
-        } else {
-            None
-        }
+    fn try_fast_path(_tcx: TyCtxt<'tcx>, key: &ParamEnvAnd<'tcx, Self>) -> Option<T> {
+        if !key.value.value.has_projections() { Some(key.value.value) } else { None }
     }
 
     fn perform_query(
-        tcx: TyCtxt<'_, 'gcx, 'tcx>,
-        canonicalized: Canonicalized<'gcx, ParamEnvAnd<'tcx, Self>>,
-    ) -> Fallible<CanonicalizedQueryResult<'gcx, Self::QueryResult>> {
+        tcx: TyCtxt<'tcx>,
+        canonicalized: Canonicalized<'tcx, ParamEnvAnd<'tcx, Self>>,
+    ) -> Fallible<CanonicalizedQueryResponse<'tcx, Self::QueryResponse>> {
         T::type_op_method(tcx, canonicalized)
     }
-
-    fn shrink_to_tcx_lifetime(
-        v: &'a CanonicalizedQueryResult<'gcx, T>,
-    ) -> &'a Canonical<'tcx, QueryResult<'tcx, T>> {
-        T::shrink_to_tcx_lifetime(v)
-    }
 }
 
-pub trait Normalizable<'gcx, 'tcx>: fmt::Debug + TypeFoldable<'tcx> + Lift<'gcx> + Copy {
+pub trait Normalizable<'tcx>: fmt::Debug + TypeFoldable<'tcx> + Lift<'tcx> + Copy {
     fn type_op_method(
-        tcx: TyCtxt<'_, 'gcx, 'tcx>,
-        canonicalized: Canonicalized<'gcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
-    ) -> Fallible<CanonicalizedQueryResult<'gcx, Self>>;
-
-    /// Convert from the `'gcx` (lifted) form of `Self` into the `tcx`
-    /// form of `Self`.
-    fn shrink_to_tcx_lifetime(
-        v: &'a CanonicalizedQueryResult<'gcx, Self>,
-    ) -> &'a Canonical<'tcx, QueryResult<'tcx, Self>>;
+        tcx: TyCtxt<'tcx>,
+        canonicalized: Canonicalized<'tcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
+    ) -> Fallible<CanonicalizedQueryResponse<'tcx, Self>>;
 }
 
-impl Normalizable<'gcx, 'tcx> for Ty<'tcx>
-where
-    'gcx: 'tcx,
-{
+impl Normalizable<'tcx> for Ty<'tcx> {
     fn type_op_method(
-        tcx: TyCtxt<'_, 'gcx, 'tcx>,
-        canonicalized: Canonicalized<'gcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
-    ) -> Fallible<CanonicalizedQueryResult<'gcx, Self>> {
+        tcx: TyCtxt<'tcx>,
+        canonicalized: Canonicalized<'tcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
+    ) -> Fallible<CanonicalizedQueryResponse<'tcx, Self>> {
         tcx.type_op_normalize_ty(canonicalized)
     }
-
-    fn shrink_to_tcx_lifetime(
-        v: &'a CanonicalizedQueryResult<'gcx, Self>,
-    ) -> &'a Canonical<'tcx, QueryResult<'tcx, Self>> {
-        v
-    }
 }
 
-impl Normalizable<'gcx, 'tcx> for ty::Predicate<'tcx>
-where
-    'gcx: 'tcx,
-{
+impl Normalizable<'tcx> for ty::Predicate<'tcx> {
     fn type_op_method(
-        tcx: TyCtxt<'_, 'gcx, 'tcx>,
-        canonicalized: Canonicalized<'gcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
-    ) -> Fallible<CanonicalizedQueryResult<'gcx, Self>> {
+        tcx: TyCtxt<'tcx>,
+        canonicalized: Canonicalized<'tcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
+    ) -> Fallible<CanonicalizedQueryResponse<'tcx, Self>> {
         tcx.type_op_normalize_predicate(canonicalized)
     }
-
-    fn shrink_to_tcx_lifetime(
-        v: &'a CanonicalizedQueryResult<'gcx, Self>,
-    ) -> &'a Canonical<'tcx, QueryResult<'tcx, Self>> {
-        v
-    }
 }
 
-impl Normalizable<'gcx, 'tcx> for ty::PolyFnSig<'tcx>
-where
-    'gcx: 'tcx,
-{
+impl Normalizable<'tcx> for ty::PolyFnSig<'tcx> {
     fn type_op_method(
-        tcx: TyCtxt<'_, 'gcx, 'tcx>,
-        canonicalized: Canonicalized<'gcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
-    ) -> Fallible<CanonicalizedQueryResult<'gcx, Self>> {
+        tcx: TyCtxt<'tcx>,
+        canonicalized: Canonicalized<'tcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
+    ) -> Fallible<CanonicalizedQueryResponse<'tcx, Self>> {
         tcx.type_op_normalize_poly_fn_sig(canonicalized)
     }
-
-    fn shrink_to_tcx_lifetime(
-        v: &'a CanonicalizedQueryResult<'gcx, Self>,
-    ) -> &'a Canonical<'tcx, QueryResult<'tcx, Self>> {
-        v
-    }
 }
 
-impl Normalizable<'gcx, 'tcx> for ty::FnSig<'tcx>
-where
-    'gcx: 'tcx,
-{
+impl Normalizable<'tcx> for ty::FnSig<'tcx> {
     fn type_op_method(
-        tcx: TyCtxt<'_, 'gcx, 'tcx>,
-        canonicalized: Canonicalized<'gcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
-    ) -> Fallible<CanonicalizedQueryResult<'gcx, Self>> {
+        tcx: TyCtxt<'tcx>,
+        canonicalized: Canonicalized<'tcx, ParamEnvAnd<'tcx, Normalize<Self>>>,
+    ) -> Fallible<CanonicalizedQueryResponse<'tcx, Self>> {
         tcx.type_op_normalize_fn_sig(canonicalized)
-    }
-
-    fn shrink_to_tcx_lifetime(
-        v: &'a CanonicalizedQueryResult<'gcx, Self>,
-    ) -> &'a Canonical<'tcx, QueryResult<'tcx, Self>> {
-        v
-    }
-}
-
-BraceStructTypeFoldableImpl! {
-    impl<'tcx, T> TypeFoldable<'tcx> for Normalize<T> {
-        value,
-    } where T: TypeFoldable<'tcx>,
-}
-
-BraceStructLiftImpl! {
-    impl<'tcx, T> Lift<'tcx> for Normalize<T> {
-        type Lifted = Normalize<T::Lifted>;
-        value,
-    } where T: Lift<'tcx>,
-}
-
-impl_stable_hash_for! {
-    impl<'tcx, T> for struct Normalize<T> {
-        value
     }
 }

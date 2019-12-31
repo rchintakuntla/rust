@@ -1,24 +1,19 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use std::ffi::OsStr;
+use crate::common::Config;
 use std::env;
+use std::ffi::OsStr;
 use std::path::PathBuf;
-use common::Config;
+
+use log::*;
+
+#[cfg(test)]
+mod tests;
 
 /// Conversion table from triple OS name to Rust SYSNAME
 const OS_TABLE: &'static [(&'static str, &'static str)] = &[
     ("android", "android"),
     ("androideabi", "android"),
-    ("bitrig", "bitrig"),
     ("cloudabi", "cloudabi"),
+    ("cuda", "cuda"),
     ("darwin", "macos"),
     ("dragonfly", "dragonfly"),
     ("emscripten", "emscripten"),
@@ -30,12 +25,15 @@ const OS_TABLE: &'static [(&'static str, &'static str)] = &[
     ("l4re", "l4re"),
     ("linux", "linux"),
     ("mingw32", "windows"),
+    ("none", "none"),
     ("netbsd", "netbsd"),
     ("openbsd", "openbsd"),
     ("redox", "redox"),
+    ("sgx", "sgx"),
     ("solaris", "solaris"),
     ("win32", "windows"),
     ("windows", "windows"),
+    ("vxworks", "vxworks"),
 ];
 
 const ARCH_TABLE: &'static [(&'static str, &'static str)] = &[
@@ -55,8 +53,17 @@ const ARCH_TABLE: &'static [(&'static str, &'static str)] = &[
     ("mips", "mips"),
     ("mips64", "mips64"),
     ("mips64el", "mips64"),
+    ("mipsisa32r6", "mips"),
+    ("mipsisa32r6el", "mips"),
+    ("mipsisa64r6", "mips64"),
+    ("mipsisa64r6el", "mips64"),
     ("mipsel", "mips"),
+    ("mipsisa32r6", "mips"),
+    ("mipsisa32r6el", "mips"),
+    ("mipsisa64r6", "mips64"),
+    ("mipsisa64r6el", "mips64"),
     ("msp430", "msp430"),
+    ("nvptx64", "nvptx64"),
     ("powerpc", "powerpc"),
     ("powerpc64", "powerpc64"),
     ("powerpc64le", "powerpc64"),
@@ -86,6 +93,8 @@ pub fn matches_os(triple: &str, name: &str) -> bool {
     }
     panic!("Cannot determine OS from triple");
 }
+
+/// Determine the architecture from `triple`
 pub fn get_arch(triple: &str) -> &'static str {
     let triple: Vec<_> = triple.split('-').collect();
     for &(triple_arch, arch) in ARCH_TABLE {
@@ -96,8 +105,8 @@ pub fn get_arch(triple: &str) -> &'static str {
     panic!("Cannot determine Architecture from triple");
 }
 
-pub fn get_env(triple: &str) -> Option<&str> {
-    triple.split('-').nth(3)
+pub fn matches_env(triple: &str, name: &str) -> bool {
+    if let Some(env) = triple.split('-').nth(3) { env.starts_with(name) } else { false }
 }
 
 pub fn get_pointer_width(triple: &str) -> &'static str {

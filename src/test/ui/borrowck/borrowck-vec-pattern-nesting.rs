@@ -1,13 +1,3 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![feature(box_patterns)]
 #![feature(box_syntax)]
 #![feature(slice_patterns)]
@@ -16,10 +6,11 @@ fn a() {
     let mut vec = [box 1, box 2, box 3];
     match vec {
         [box ref _a, _, _] => {
-        //~^ borrow of `vec[..]` occurs here
+        //~^ NOTE borrow of `vec[_]` occurs here
             vec[0] = box 4; //~ ERROR cannot assign
-            //~^ assignment to borrowed `vec[..]` occurs here
+            //~^ NOTE assignment to borrowed `vec[_]` occurs here
             _a.use_ref();
+            //~^ NOTE borrow later used here
         }
     }
 }
@@ -28,11 +19,12 @@ fn b() {
     let mut vec = vec![box 1, box 2, box 3];
     let vec: &mut [Box<isize>] = &mut vec;
     match vec {
-        &mut [ref _b..] => {
-        //~^ borrow of `vec[..]` occurs here
+        &mut [ref _b @ ..] => {
+        //~^ borrow of `vec[_]` occurs here
             vec[0] = box 4; //~ ERROR cannot assign
-            //~^ assignment to borrowed `vec[..]` occurs here
+            //~^ NOTE assignment to borrowed `vec[_]` occurs here
             _b.use_ref();
+            //~^ NOTE borrow later used here
         }
     }
 }
@@ -41,46 +33,60 @@ fn c() {
     let mut vec = vec![box 1, box 2, box 3];
     let vec: &mut [Box<isize>] = &mut vec;
     match vec {
-        &mut [_a, //~ ERROR cannot move out
-            //~| cannot move out
-            //~| to prevent move
+        //~^ ERROR cannot move out
+        //~| NOTE cannot move out
+        &mut [_a,
+        //~^ NOTE data moved here
+        //~| NOTE move occurs because `_a` has type
+        //~| HELP consider removing the `&mut`
             ..
         ] => {
-            // Note: `_a` is *moved* here, but `b` is borrowing,
-            // hence illegal.
-            //
-            // See comment in middle/borrowck/gather_loans/mod.rs
-            // in the case covering these sorts of vectors.
         }
         _ => {}
     }
     let a = vec[0]; //~ ERROR cannot move out
-    //~| cannot move out of here
+    //~| NOTE cannot move out of here
+    //~| NOTE move occurs because
+    //~| HELP consider borrowing here
 }
 
 fn d() {
     let mut vec = vec![box 1, box 2, box 3];
     let vec: &mut [Box<isize>] = &mut vec;
     match vec {
-        &mut [ //~ ERROR cannot move out
-        //~^ cannot move out
+        //~^ ERROR cannot move out
+        //~| NOTE cannot move out
+        &mut [
+        //~^ HELP consider removing the `&mut`
          _b] => {}
+        //~^ NOTE data moved here
+        //~| NOTE move occurs because `_b` has type
         _ => {}
     }
     let a = vec[0]; //~ ERROR cannot move out
-    //~| cannot move out of here
+    //~| NOTE cannot move out of here
+    //~| NOTE move occurs because
+    //~| HELP consider borrowing here
 }
 
 fn e() {
     let mut vec = vec![box 1, box 2, box 3];
     let vec: &mut [Box<isize>] = &mut vec;
     match vec {
-        &mut [_a, _b, _c] => {}  //~ ERROR cannot move out
-        //~| cannot move out
+        //~^ ERROR cannot move out
+        //~| NOTE cannot move out
+        //~| NOTE move occurs because these variables have types
+        &mut [_a, _b, _c] => {}
+        //~^ NOTE data moved here
+        //~| NOTE and here
+        //~| NOTE and here
+        //~| HELP consider removing the `&mut`
         _ => {}
     }
     let a = vec[0]; //~ ERROR cannot move out
-    //~| cannot move out of here
+    //~| NOTE cannot move out of here
+    //~| NOTE move occurs because
+    //~| HELP consider borrowing here
 }
 
 fn main() {}

@@ -1,21 +1,18 @@
-// Copyright 2012-2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+use std::{io, io::prelude::Write};
 
-use super::*;
+use crate::{
+    console::ConsoleTestState,
+    test_result::TestResult,
+    time,
+    types::{TestDesc, TestName},
+};
 
-mod pretty;
 mod json;
+mod pretty;
 mod terse;
 
-pub(crate) use self::pretty::PrettyFormatter;
 pub(crate) use self::json::JsonFormatter;
+pub(crate) use self::pretty::PrettyFormatter;
 pub(crate) use self::terse::TerseFormatter;
 
 pub(crate) trait OutputFormatter {
@@ -26,7 +23,18 @@ pub(crate) trait OutputFormatter {
         &mut self,
         desc: &TestDesc,
         result: &TestResult,
+        exec_time: Option<&time::TestExecTime>,
         stdout: &[u8],
+        state: &ConsoleTestState,
     ) -> io::Result<()>;
     fn write_run_finish(&mut self, state: &ConsoleTestState) -> io::Result<bool>;
+}
+
+pub(crate) fn write_stderr_delimiter(test_output: &mut Vec<u8>, test_name: &TestName) {
+    match test_output.last() {
+        Some(b'\n') => (),
+        Some(_) => test_output.push(b'\n'),
+        None => (),
+    }
+    write!(test_output, "---- {} stderr ----\n", test_name).unwrap();
 }

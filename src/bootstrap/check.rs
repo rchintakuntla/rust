@@ -1,20 +1,10 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
+//! Implementation of compiling the compiler and standard library, in "check"-based modes.
 
-//! Implementation of compiling the compiler and standard library, in "check" mode.
-
-use compile::{run_cargo, std_cargo, test_cargo, rustc_cargo, rustc_cargo_env, add_to_sysroot};
-use builder::{RunConfig, Builder, ShouldRun, Step};
-use tool::{self, prepare_tool_cargo, SourceType};
-use {Compiler, Mode};
-use cache::{INTERNER, Interned};
+use crate::builder::{Builder, Kind, RunConfig, ShouldRun, Step};
+use crate::cache::Interned;
+use crate::compile::{add_to_sysroot, run_cargo, rustc_cargo, std_cargo};
+use crate::tool::{prepare_tool_cargo, SourceType};
+use crate::{Compiler, Mode};
 use std::path::PathBuf;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -22,39 +12,54 @@ pub struct Std {
     pub target: Interned<String>,
 }
 
+fn args(kind: Kind) -> Vec<String> {
+    match kind {
+        Kind::Clippy => vec!["--".to_owned(), "--cap-lints".to_owned(), "warn".to_owned()],
+        _ => Vec::new(),
+    }
+}
+
+fn cargo_subcommand(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Check => "check",
+        Kind::Clippy => "clippy",
+        Kind::Fix => "fix",
+        _ => unreachable!(),
+    }
+}
+
 impl Step for Std {
     type Output = ();
     const DEFAULT: bool = true;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
-        run.all_krates("std")
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
+        run.all_krates("test")
     }
 
-    fn make_run(run: RunConfig) {
-        run.builder.ensure(Std {
-            target: run.target,
-        });
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(Std { target: run.target });
     }
 
-    fn run(self, builder: &Builder) {
+    fn run(self, builder: &Builder<'_>) {
         let target = self.target;
         let compiler = builder.compiler(0, builder.config.build);
 
-        let out_dir = builder.stage_out(compiler, Mode::Std);
-        builder.clear_if_dirty(&out_dir, &builder.rustc(compiler));
-
-        let mut cargo = builder.cargo(compiler, Mode::Std, target, "check");
+        let mut cargo = builder.cargo(compiler, Mode::Std, target, cargo_subcommand(builder.kind));
         std_cargo(builder, &compiler, target, &mut cargo);
 
-        let _folder = builder.fold_output(|| format!("stage{}-std", compiler.stage));
-        println!("Checking std artifacts ({} -> {})", &compiler.host, target);
-        run_cargo(builder,
-                  &mut cargo,
-                  &libstd_stamp(builder, compiler, target),
-                  true);
+        builder.info(&format!("Checking std artifacts ({} -> {})", &compiler.host, target));
+        run_cargo(
+            builder,
+            cargo,
+            args(builder.kind),
+            &libstd_stamp(builder, compiler, target),
+            vec![],
+            true,
+        );
 
         let libdir = builder.sysroot_libdir(compiler, target);
-        add_to_sysroot(&builder, &libdir, &libstd_stamp(builder, compiler, target));
+        let hostdir = builder.sysroot_libdir(compiler, compiler.host);
+        add_to_sysroot(&builder, &libdir, &hostdir, &libstd_stamp(builder, compiler, target));
     }
 }
 
@@ -68,130 +73,42 @@ impl Step for Rustc {
     const ONLY_HOSTS: bool = true;
     const DEFAULT: bool = true;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.all_krates("rustc-main")
     }
 
-    fn make_run(run: RunConfig) {
-        run.builder.ensure(Rustc {
-            target: run.target,
-        });
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(Rustc { target: run.target });
     }
 
-    /// Build the compiler.
+    /// Builds the compiler.
     ///
     /// This will build the compiler for a particular stage of the build using
     /// the `compiler` targeting the `target` architecture. The artifacts
     /// created will also be linked into the sysroot directory.
-    fn run(self, builder: &Builder) {
+    fn run(self, builder: &Builder<'_>) {
         let compiler = builder.compiler(0, builder.config.build);
         let target = self.target;
 
-        let stage_out = builder.stage_out(compiler, Mode::Rustc);
-        builder.clear_if_dirty(&stage_out, &libstd_stamp(builder, compiler, target));
-        builder.clear_if_dirty(&stage_out, &libtest_stamp(builder, compiler, target));
+        builder.ensure(Std { target });
 
-        let mut cargo = builder.cargo(compiler, Mode::Rustc, target, "check");
-        rustc_cargo(builder, &mut cargo);
+        let mut cargo =
+            builder.cargo(compiler, Mode::Rustc, target, cargo_subcommand(builder.kind));
+        rustc_cargo(builder, &mut cargo, target);
 
-        let _folder = builder.fold_output(|| format!("stage{}-rustc", compiler.stage));
-        println!("Checking compiler artifacts ({} -> {})", &compiler.host, target);
-        run_cargo(builder,
-                  &mut cargo,
-                  &librustc_stamp(builder, compiler, target),
-                  true);
+        builder.info(&format!("Checking compiler artifacts ({} -> {})", &compiler.host, target));
+        run_cargo(
+            builder,
+            cargo,
+            args(builder.kind),
+            &librustc_stamp(builder, compiler, target),
+            vec![],
+            true,
+        );
 
         let libdir = builder.sysroot_libdir(compiler, target);
-        add_to_sysroot(&builder, &libdir, &librustc_stamp(builder, compiler, target));
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct CodegenBackend {
-    pub target: Interned<String>,
-    pub backend: Interned<String>,
-}
-
-impl Step for CodegenBackend {
-    type Output = ();
-    const ONLY_HOSTS: bool = true;
-    const DEFAULT: bool = true;
-
-    fn should_run(run: ShouldRun) -> ShouldRun {
-        run.all_krates("rustc_codegen_llvm")
-    }
-
-    fn make_run(run: RunConfig) {
-        let backend = run.builder.config.rust_codegen_backends.get(0);
-        let backend = backend.cloned().unwrap_or_else(|| {
-            INTERNER.intern_str("llvm")
-        });
-        run.builder.ensure(CodegenBackend {
-            target: run.target,
-            backend,
-        });
-    }
-
-    fn run(self, builder: &Builder) {
-        let compiler = builder.compiler(0, builder.config.build);
-        let target = self.target;
-        let backend = self.backend;
-
-        let out_dir = builder.cargo_out(compiler, Mode::Codegen, target);
-        builder.clear_if_dirty(&out_dir, &librustc_stamp(builder, compiler, target));
-
-        let mut cargo = builder.cargo(compiler, Mode::Codegen, target, "check");
-        cargo.arg("--manifest-path").arg(builder.src.join("src/librustc_codegen_llvm/Cargo.toml"));
-        rustc_cargo_env(builder, &mut cargo);
-
-        // We won't build LLVM if it's not available, as it shouldn't affect `check`.
-
-        let _folder = builder.fold_output(|| format!("stage{}-rustc_codegen_llvm", compiler.stage));
-        run_cargo(builder,
-                  &mut cargo,
-                  &codegen_backend_stamp(builder, compiler, target, backend),
-                  true);
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub struct Test {
-    pub target: Interned<String>,
-}
-
-impl Step for Test {
-    type Output = ();
-    const DEFAULT: bool = true;
-
-    fn should_run(run: ShouldRun) -> ShouldRun {
-        run.all_krates("test")
-    }
-
-    fn make_run(run: RunConfig) {
-        run.builder.ensure(Test {
-            target: run.target,
-        });
-    }
-
-    fn run(self, builder: &Builder) {
-        let compiler = builder.compiler(0, builder.config.build);
-        let target = self.target;
-
-        let out_dir = builder.stage_out(compiler, Mode::Test);
-        builder.clear_if_dirty(&out_dir, &libstd_stamp(builder, compiler, target));
-
-        let mut cargo = builder.cargo(compiler, Mode::Test, target, "check");
-        test_cargo(builder, &compiler, target, &mut cargo);
-
-        let _folder = builder.fold_output(|| format!("stage{}-test", compiler.stage));
-        println!("Checking test artifacts ({} -> {})", &compiler.host, target);
-        run_cargo(builder,
-                  &mut cargo,
-                  &libtest_stamp(builder, compiler, target),
-                  true);
-
-        let libdir = builder.sysroot_libdir(compiler, target);
-        add_to_sysroot(builder, &libdir, &libtest_stamp(builder, compiler, target));
+        let hostdir = builder.sysroot_libdir(compiler, compiler.host);
+        add_to_sysroot(&builder, &libdir, &hostdir, &librustc_stamp(builder, compiler, target));
     }
 }
 
@@ -205,82 +122,73 @@ impl Step for Rustdoc {
     const ONLY_HOSTS: bool = true;
     const DEFAULT: bool = true;
 
-    fn should_run(run: ShouldRun) -> ShouldRun {
+    fn should_run(run: ShouldRun<'_>) -> ShouldRun<'_> {
         run.path("src/tools/rustdoc")
     }
 
-    fn make_run(run: RunConfig) {
-        run.builder.ensure(Rustdoc {
-            target: run.target,
-        });
+    fn make_run(run: RunConfig<'_>) {
+        run.builder.ensure(Rustdoc { target: run.target });
     }
 
-    fn run(self, builder: &Builder) {
+    fn run(self, builder: &Builder<'_>) {
         let compiler = builder.compiler(0, builder.config.build);
         let target = self.target;
 
-        let stage_out = builder.stage_out(compiler, Mode::ToolRustc);
-        builder.clear_if_dirty(&stage_out, &libstd_stamp(builder, compiler, target));
-        builder.clear_if_dirty(&stage_out, &libtest_stamp(builder, compiler, target));
-        builder.clear_if_dirty(&stage_out, &librustc_stamp(builder, compiler, target));
+        builder.ensure(Rustc { target });
 
-        let mut cargo = prepare_tool_cargo(builder,
-                                           compiler,
-                                           Mode::ToolRustc,
-                                           target,
-                                           "check",
-                                           "src/tools/rustdoc",
-                                           SourceType::InTree);
+        let cargo = prepare_tool_cargo(
+            builder,
+            compiler,
+            Mode::ToolRustc,
+            target,
+            cargo_subcommand(builder.kind),
+            "src/tools/rustdoc",
+            SourceType::InTree,
+            &[],
+        );
 
-        let _folder = builder.fold_output(|| format!("stage{}-rustdoc", compiler.stage));
         println!("Checking rustdoc artifacts ({} -> {})", &compiler.host, target);
-        run_cargo(builder,
-                  &mut cargo,
-                  &rustdoc_stamp(builder, compiler, target),
-                  true);
+        run_cargo(
+            builder,
+            cargo,
+            args(builder.kind),
+            &rustdoc_stamp(builder, compiler, target),
+            vec![],
+            true,
+        );
 
         let libdir = builder.sysroot_libdir(compiler, target);
-        add_to_sysroot(&builder, &libdir, &rustdoc_stamp(builder, compiler, target));
-
-        builder.ensure(tool::CleanTools {
-            compiler,
-            target,
-            cause: Mode::Rustc,
-        });
+        let hostdir = builder.sysroot_libdir(compiler, compiler.host);
+        add_to_sysroot(&builder, &libdir, &hostdir, &rustdoc_stamp(builder, compiler, target));
     }
 }
 
 /// Cargo's output path for the standard library in a given stage, compiled
 /// by a particular compiler for the specified target.
-pub fn libstd_stamp(builder: &Builder, compiler: Compiler, target: Interned<String>) -> PathBuf {
+pub fn libstd_stamp(
+    builder: &Builder<'_>,
+    compiler: Compiler,
+    target: Interned<String>,
+) -> PathBuf {
     builder.cargo_out(compiler, Mode::Std, target).join(".libstd-check.stamp")
-}
-
-/// Cargo's output path for libtest in a given stage, compiled by a particular
-/// compiler for the specified target.
-pub fn libtest_stamp(builder: &Builder, compiler: Compiler, target: Interned<String>) -> PathBuf {
-    builder.cargo_out(compiler, Mode::Test, target).join(".libtest-check.stamp")
 }
 
 /// Cargo's output path for librustc in a given stage, compiled by a particular
 /// compiler for the specified target.
-pub fn librustc_stamp(builder: &Builder, compiler: Compiler, target: Interned<String>) -> PathBuf {
+pub fn librustc_stamp(
+    builder: &Builder<'_>,
+    compiler: Compiler,
+    target: Interned<String>,
+) -> PathBuf {
     builder.cargo_out(compiler, Mode::Rustc, target).join(".librustc-check.stamp")
-}
-
-/// Cargo's output path for librustc_codegen_llvm in a given stage, compiled by a particular
-/// compiler for the specified target and backend.
-fn codegen_backend_stamp(builder: &Builder,
-                         compiler: Compiler,
-                         target: Interned<String>,
-                         backend: Interned<String>) -> PathBuf {
-    builder.cargo_out(compiler, Mode::Codegen, target)
-         .join(format!(".librustc_codegen_llvm-{}-check.stamp", backend))
 }
 
 /// Cargo's output path for rustdoc in a given stage, compiled by a particular
 /// compiler for the specified target.
-pub fn rustdoc_stamp(builder: &Builder, compiler: Compiler, target: Interned<String>) -> PathBuf {
-    builder.cargo_out(compiler, Mode::ToolRustc, target)
-        .join(".rustdoc-check.stamp")
+pub fn rustdoc_stamp(
+    builder: &Builder<'_>,
+    compiler: Compiler,
+    target: Interned<String>,
+) -> PathBuf {
+    builder.cargo_out(compiler, Mode::ToolRustc, target).join(".rustdoc-check.stamp")
 }

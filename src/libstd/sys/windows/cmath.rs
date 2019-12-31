@@ -1,19 +1,9 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #![cfg(not(test))]
 
-use libc::{c_float, c_double};
+use libc::{c_double, c_float};
 
 #[link_name = "m"]
-extern {
+extern "C" {
     pub fn acos(n: c_double) -> c_double;
     pub fn asin(n: c_double) -> c_double;
     pub fn atan(n: c_double) -> c_double;
@@ -42,7 +32,7 @@ pub use self::shims::*;
 mod shims {
     use libc::c_float;
 
-    extern {
+    extern "C" {
         pub fn acosf(n: c_float) -> c_float;
         pub fn asinf(n: c_float) -> c_float;
         pub fn atan2f(a: c_float, b: c_float) -> c_float;

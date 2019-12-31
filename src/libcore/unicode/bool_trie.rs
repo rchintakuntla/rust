@@ -1,13 +1,3 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 /// BoolTrie is a trie for representing a set of Unicode codepoints. It is
 /// implemented with postfix compression (sharing of identical child nodes),
 /// which gives both compact size and fast lookup.
@@ -29,16 +19,16 @@
 /// non-BMP range of most Unicode sets.
 pub struct BoolTrie {
     // 0..0x800 (corresponding to 1 and 2 byte utf-8 sequences)
-    pub r1: [u64; 32],   // leaves
+    pub r1: [u64; 32], // leaves
 
     // 0x800..0x10000 (corresponding to 3 byte utf-8 sequences)
     pub r2: [u8; 992],      // first level
-    pub r3: &'static [u64],  // leaves
+    pub r3: &'static [u64], // leaves
 
     // 0x10000..0x110000 (corresponding to 4 byte utf-8 sequences)
-    pub r4: [u8; 256],       // first level
-    pub r5: &'static [u8],   // second level
-    pub r6: &'static [u64],  // leaves
+    pub r4: [u8; 256],      // first level
+    pub r5: &'static [u8],  // second level
+    pub r6: &'static [u64], // leaves
 }
 impl BoolTrie {
     pub fn lookup(&self, c: char) -> bool {
@@ -58,7 +48,7 @@ impl BoolTrie {
 
 pub struct SmallBoolTrie {
     pub(crate) r1: &'static [u8],  // first level
-    pub(crate) r2: &'static [u64],  // leaves
+    pub(crate) r2: &'static [u64], // leaves
 }
 
 impl SmallBoolTrie {

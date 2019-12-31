@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 #[doc(primitive = "bool")]
 #[doc(alias = "true")]
 #[doc(alias = "false")]
@@ -22,7 +12,7 @@
 /// `bool` implements various traits, such as [`BitAnd`], [`BitOr`], [`Not`], etc.,
 /// which allow us to perform boolean operations using `&`, `|` and `!`.
 ///
-/// [`if`] always demands a `bool` value. [`assert!`], being an important macro in testing,
+/// `if` always demands a `bool` value. [`assert!`], being an important macro in testing,
 /// checks whether an expression returns `true`.
 ///
 /// ```
@@ -31,7 +21,6 @@
 /// ```
 ///
 /// [`assert!`]: macro.assert.html
-/// [`if`]: ../book/first-edition/if.html
 /// [`BitAnd`]: ops/trait.BitAnd.html
 /// [`BitOr`]: ops/trait.BitOr.html
 /// [`Not`]: ops/trait.Not.html
@@ -67,7 +56,7 @@
 /// assert_eq!(false as i32, 0);
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_bool { }
+mod prim_bool {}
 
 #[doc(primitive = "never")]
 #[doc(alias = "!")]
@@ -131,13 +120,13 @@ mod prim_bool { }
 /// When implementing this trait for [`String`] we need to pick a type for [`Err`]. And since
 /// converting a string into a string will never result in an error, the appropriate type is `!`.
 /// (Currently the type actually used is an enum with no variants, though this is only because `!`
-/// was added to Rust at a later date and it may change in the future). With an [`Err`] type of
+/// was added to Rust at a later date and it may change in the future.) With an [`Err`] type of
 /// `!`, if we have to call [`String::from_str`] for some reason the result will be a
 /// [`Result<String, !>`] which we can unpack like this:
 ///
 /// ```ignore (string-from-str-error-type-is-not-never-yet)
 /// #[feature(exhaustive_patterns)]
-/// // NOTE: This does not work today!
+/// // NOTE: this does not work today!
 /// let Ok(s) = String::from_str("hello");
 /// ```
 ///
@@ -208,17 +197,17 @@ mod prim_bool { }
 /// # `!` and traits
 ///
 /// When writing your own traits, `!` should have an `impl` whenever there is an obvious `impl`
-/// which doesn't `panic!`. As is turns out, most traits can have an `impl` for `!`. Take [`Debug`]
+/// which doesn't `panic!`. As it turns out, most traits can have an `impl` for `!`. Take [`Debug`]
 /// for example:
 ///
 /// ```
 /// #![feature(never_type)]
 /// # use std::fmt;
 /// # trait Debug {
-/// # fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result;
+/// # fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result;
 /// # }
 /// impl Debug for ! {
-///     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+///     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
 ///         *self
 ///     }
 /// }
@@ -228,9 +217,9 @@ mod prim_bool { }
 /// [`fmt::Result`]. Since this method takes a `&!` as an argument we know that it can never be
 /// called (because there is no value of type `!` for it to be called with). Writing `*self`
 /// essentially tells the compiler "We know that this code can never be run, so just treat the
-/// entire function body has having type [`fmt::Result`]". This pattern can be used a lot when
+/// entire function body as having type [`fmt::Result`]". This pattern can be used a lot when
 /// implementing traits for `!`. Generally, any trait which only has methods which take a `self`
-/// parameter should have such as impl.
+/// parameter should have such an impl.
 ///
 /// On the other hand, one trait which would not be appropriate to implement is [`Default`]:
 ///
@@ -250,7 +239,8 @@ mod prim_bool { }
 /// [`Default`]: default/trait.Default.html
 /// [`default()`]: default/trait.Default.html#tymethod.default
 ///
-mod prim_never { }
+#[unstable(feature = "never_type", issue = "35121")]
+mod prim_never {}
 
 #[doc(primitive = "char")]
 //
@@ -289,7 +279,7 @@ mod prim_never { }
 ///
 /// As always, remember that a human intuition for 'character' may not map to
 /// Unicode's definitions. For example, despite looking similar, the 'é'
-/// character is one Unicode code point while 'é' is two Unicode code points:
+/// character is one Unicode code point while 'é' is two Unicode code points:
 ///
 /// ```
 /// let mut chars = "é".chars();
@@ -312,7 +302,7 @@ mod prim_never { }
 /// ```text
 /// error: character literal may only contain one codepoint: 'é'
 /// let c = 'é';
-///         ^^^^
+///         ^^^
 /// ```
 ///
 /// Another implication of the 4-byte fixed size of a `char` is that
@@ -322,11 +312,11 @@ mod prim_never { }
 /// let s = String::from("love: ❤️");
 /// let v: Vec<char> = s.chars().collect();
 ///
-/// assert_eq!(12, s.len() * std::mem::size_of::<u8>());
-/// assert_eq!(32, v.len() * std::mem::size_of::<char>());
+/// assert_eq!(12, std::mem::size_of_val(&s[..]));
+/// assert_eq!(32, std::mem::size_of_val(&v[..]));
 /// ```
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_char { }
+mod prim_char {}
 
 #[doc(primitive = "unit")]
 //
@@ -364,7 +354,7 @@ mod prim_char { }
 /// ```
 ///
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_unit { }
+mod prim_unit {}
 
 #[doc(primitive = "pointer")]
 //
@@ -372,8 +362,13 @@ mod prim_unit { }
 ///
 /// *[See also the `std::ptr` module](ptr/index.html).*
 ///
-/// Working with raw pointers in Rust is uncommon,
-/// typically limited to a few patterns.
+/// Working with raw pointers in Rust is uncommon, typically limited to a few patterns.
+/// Raw pointers can be unaligned or [`null`]. However, when a raw pointer is
+/// dereferenced (using the `*` operator), it must be non-null and aligned.
+///
+/// Storing through a raw pointer using `*ptr = data` calls `drop` on the old value, so
+/// [`write`] must be used if the type has drop glue and memory is not already
+/// initialized - otherwise `drop` would be called on the uninitialized memory.
 ///
 /// Use the [`null`] and [`null_mut`] functions to create null pointers, and the
 /// [`is_null`] method of the `*const T` and `*mut T` types to check for null.
@@ -426,19 +421,17 @@ mod prim_unit { }
 /// ## 3. Get it from C.
 ///
 /// ```
-/// # #![feature(libc)]
+/// # #![feature(rustc_private)]
 /// extern crate libc;
 ///
 /// use std::mem;
 ///
-/// fn main() {
-///     unsafe {
-///         let my_num: *mut i32 = libc::malloc(mem::size_of::<i32>()) as *mut i32;
-///         if my_num.is_null() {
-///             panic!("failed to allocate memory");
-///         }
-///         libc::free(my_num as *mut libc::c_void);
+/// unsafe {
+///     let my_num: *mut i32 = libc::malloc(mem::size_of::<i32>()) as *mut i32;
+///     if my_num.is_null() {
+///         panic!("failed to allocate memory");
 ///     }
+///     libc::free(my_num as *mut libc::c_void);
 /// }
 /// ```
 ///
@@ -452,8 +445,9 @@ mod prim_unit { }
 /// [`offset`]: ../std/primitive.pointer.html#method.offset
 /// [`into_raw`]: ../std/boxed/struct.Box.html#method.into_raw
 /// [`drop`]: ../std/mem/fn.drop.html
+/// [`write`]: ../std/ptr/fn.write.html
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_pointer { }
+mod prim_pointer {}
 
 #[doc(primitive = "array")]
 //
@@ -462,7 +456,7 @@ mod prim_pointer { }
 ///
 /// There are two syntactic forms for creating an array:
 ///
-/// * A list with each element, i.e. `[x, y, z]`.
+/// * A list with each element, i.e., `[x, y, z]`.
 /// * A repeat expression `[x; N]`, which produces an array with `N` copies of `x`.
 ///   The type of `x` must be [`Copy`][copy].
 ///
@@ -492,8 +486,8 @@ mod prim_pointer { }
 /// an array. Indeed, this provides most of the API for working with arrays.
 /// Slices have a dynamic size and do not coerce to arrays.
 ///
-/// There is no way to move elements out of an array. See [`mem::replace`][replace]
-/// for an alternative.
+/// You can move elements out of an array with a slice pattern. If you want
+/// one element, see [`mem::replace`][replace].
 ///
 /// # Examples
 ///
@@ -535,6 +529,16 @@ mod prim_pointer { }
 /// for x in &array { }
 /// ```
 ///
+/// You can use a slice pattern to move elements out of an array:
+///
+/// ```
+/// fn move_away(_: String) { /* Do interesting things. */ }
+///
+/// let [john, roa] = ["John".to_string(), "Roa".to_string()];
+/// move_away(john);
+/// move_away(roa);
+/// ```
+///
 /// [slice]: primitive.slice.html
 /// [copy]: marker/trait.Copy.html
 /// [clone]: clone/trait.Clone.html
@@ -554,14 +558,15 @@ mod prim_pointer { }
 /// [`IntoIterator`]: iter/trait.IntoIterator.html
 ///
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_array { }
+mod prim_array {}
 
 #[doc(primitive = "slice")]
 #[doc(alias = "[")]
 #[doc(alias = "]")]
 #[doc(alias = "[]")]
-//
-/// A dynamically-sized view into a contiguous sequence, `[T]`.
+/// A dynamically-sized view into a contiguous sequence, `[T]`. Contiguous here
+/// means that elements are laid out so that every element is the same
+/// distance from its neighbors.
 ///
 /// *[See also the `std::slice` module](slice/index.html).*
 ///
@@ -582,13 +587,13 @@ mod prim_array { }
 /// points to:
 ///
 /// ```
-/// let x = &mut [1, 2, 3];
+/// let mut x = [1, 2, 3];
+/// let x = &mut x[..]; // Take a full slice of `x`.
 /// x[1] = 7;
 /// assert_eq!(x, &[1, 7, 3]);
 /// ```
-///
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_slice { }
+mod prim_slice {}
 
 #[doc(primitive = "str")]
 //
@@ -650,10 +655,10 @@ mod prim_slice { }
 /// [`len`]: #method.len
 ///
 /// Note: This example shows the internals of `&str`. `unsafe` should not be
-/// used to get a string slice under normal circumstances. Use `as_slice`
+/// used to get a string slice under normal circumstances. Use `as_str`
 /// instead.
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_str { }
+mod prim_str {}
 
 #[doc(primitive = "tuple")]
 #[doc(alias = "(")]
@@ -694,7 +699,11 @@ mod prim_str { }
 /// assert_eq!(tuple.2, 'c');
 /// ```
 ///
-/// For more about tuples, see [the book](../book/first-edition/primitive-types.html#tuples).
+/// The sequential nature of the tuple applies to its implementations of various
+/// traits.  For example, in `PartialOrd` and `Ord`, the elements are compared
+/// sequentially until the first non-equal set is found.
+///
+/// For more about tuples, see [the book](../book/ch03-02-data-types.html#the-tuple-type).
 ///
 /// # Trait implementations
 ///
@@ -757,7 +766,7 @@ mod prim_str { }
 /// ```
 ///
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_tuple { }
+mod prim_tuple {}
 
 #[doc(primitive = "f32")]
 /// The 32-bit floating point type.
@@ -765,7 +774,7 @@ mod prim_tuple { }
 /// *[See also the `std::f32` module](f32/index.html).*
 ///
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_f32 { }
+mod prim_f32 {}
 
 #[doc(primitive = "f64")]
 //
@@ -774,7 +783,7 @@ mod prim_f32 { }
 /// *[See also the `std::f64` module](f64/index.html).*
 ///
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_f64 { }
+mod prim_f64 {}
 
 #[doc(primitive = "i8")]
 //
@@ -782,7 +791,7 @@ mod prim_f64 { }
 ///
 /// *[See also the `std::i8` module](i8/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_i8 { }
+mod prim_i8 {}
 
 #[doc(primitive = "i16")]
 //
@@ -790,7 +799,7 @@ mod prim_i8 { }
 ///
 /// *[See also the `std::i16` module](i16/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_i16 { }
+mod prim_i16 {}
 
 #[doc(primitive = "i32")]
 //
@@ -798,7 +807,7 @@ mod prim_i16 { }
 ///
 /// *[See also the `std::i32` module](i32/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_i32 { }
+mod prim_i32 {}
 
 #[doc(primitive = "i64")]
 //
@@ -806,15 +815,15 @@ mod prim_i32 { }
 ///
 /// *[See also the `std::i64` module](i64/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_i64 { }
+mod prim_i64 {}
 
 #[doc(primitive = "i128")]
 //
 /// The 128-bit signed integer type.
 ///
 /// *[See also the `std::i128` module](i128/index.html).*
-#[stable(feature = "i128", since="1.26.0")]
-mod prim_i128 { }
+#[stable(feature = "i128", since = "1.26.0")]
+mod prim_i128 {}
 
 #[doc(primitive = "u8")]
 //
@@ -822,7 +831,7 @@ mod prim_i128 { }
 ///
 /// *[See also the `std::u8` module](u8/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_u8 { }
+mod prim_u8 {}
 
 #[doc(primitive = "u16")]
 //
@@ -830,7 +839,7 @@ mod prim_u8 { }
 ///
 /// *[See also the `std::u16` module](u16/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_u16 { }
+mod prim_u16 {}
 
 #[doc(primitive = "u32")]
 //
@@ -838,7 +847,7 @@ mod prim_u16 { }
 ///
 /// *[See also the `std::u32` module](u32/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_u32 { }
+mod prim_u32 {}
 
 #[doc(primitive = "u64")]
 //
@@ -846,15 +855,15 @@ mod prim_u32 { }
 ///
 /// *[See also the `std::u64` module](u64/index.html).*
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_u64 { }
+mod prim_u64 {}
 
 #[doc(primitive = "u128")]
 //
 /// The 128-bit unsigned integer type.
 ///
 /// *[See also the `std::u128` module](u128/index.html).*
-#[stable(feature = "i128", since="1.26.0")]
-mod prim_u128 { }
+#[stable(feature = "i128", since = "1.26.0")]
+mod prim_u128 {}
 
 #[doc(primitive = "isize")]
 //
@@ -866,7 +875,7 @@ mod prim_u128 { }
 /// location in memory. For example, on a 32 bit target, this is 4 bytes
 /// and on a 64 bit target, this is 8 bytes.
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_isize { }
+mod prim_isize {}
 
 #[doc(primitive = "usize")]
 //
@@ -878,7 +887,7 @@ mod prim_isize { }
 /// location in memory. For example, on a 32 bit target, this is 4 bytes
 /// and on a 64 bit target, this is 8 bytes.
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_usize { }
+mod prim_usize {}
 
 #[doc(primitive = "reference")]
 #[doc(alias = "&")]
@@ -888,9 +897,13 @@ mod prim_usize { }
 /// A reference represents a borrow of some owned value. You can get one by using the `&` or `&mut`
 /// operators on a value, or by using a `ref` or `ref mut` pattern.
 ///
-/// For those familiar with pointers, a reference is just a pointer that is assumed to not be null.
-/// In fact, `Option<&T>` has the same memory representation as a nullable pointer, and can be
-/// passed across FFI boundaries as such.
+/// For those familiar with pointers, a reference is just a pointer that is assumed to be
+/// aligned, not null, and pointing to memory containing a valid value of `T` - for example,
+/// `&bool` can only point to an allocation containing the integer values `1` (`true`) or `0`
+/// (`false`), but creating a `&bool` that points to an allocation containing
+/// the value `3` causes undefined behaviour.
+/// In fact, `Option<&T>` has the same memory representation as a
+/// nullable but aligned pointer, and can be passed across FFI boundaries as such.
 ///
 /// In most cases, references can be used much like the original value. Field access, method
 /// calling, and indexing work the same (save for mutability rules, of course). In addition, the
@@ -907,10 +920,35 @@ mod prim_usize { }
 /// `&mut T` references can be freely coerced into `&T` references with the same referent type, and
 /// references with longer lifetimes can be freely coerced into references with shorter ones.
 ///
+/// Reference equality by address, instead of comparing the values pointed to, is accomplished via
+/// implicit reference-pointer coercion and raw pointer equality via [`ptr::eq`], while
+/// [`PartialEq`] compares values.
+///
+/// [`ptr::eq`]: ptr/fn.eq.html
+/// [`PartialEq`]: cmp/trait.PartialEq.html
+///
+/// ```
+/// use std::ptr;
+///
+/// let five = 5;
+/// let other_five = 5;
+/// let five_ref = &five;
+/// let same_five_ref = &five;
+/// let other_five_ref = &other_five;
+///
+/// assert!(five_ref == same_five_ref);
+/// assert!(five_ref == other_five_ref);
+///
+/// assert!(ptr::eq(five_ref, same_five_ref));
+/// assert!(!ptr::eq(five_ref, other_five_ref));
+/// ```
+///
 /// For more information on how to use references, see [the book's section on "References and
 /// Borrowing"][book-refs].
 ///
-/// [book-refs]: ../book/second-edition/ch04-02-references-and-borrowing.html
+/// [book-refs]: ../book/ch04-02-references-and-borrowing.html
+///
+/// # Trait implementations
 ///
 /// The following traits are implemented for all `&T`, regardless of the type of its referent:
 ///
@@ -996,7 +1034,7 @@ mod prim_usize { }
 /// meant for generic contexts, where the final type `T` is a type parameter or otherwise not
 /// locally known.
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_ref { }
+mod prim_ref {}
 
 #[doc(primitive = "fn")]
 //
@@ -1007,6 +1045,11 @@ mod prim_ref { }
 /// [`Fn`]: ops/trait.Fn.html
 /// [`FnMut`]: ops/trait.FnMut.html
 /// [`FnOnce`]: ops/trait.FnOnce.html
+///
+/// Function pointers are pointers that point to *code*, not data. They can be called
+/// just like functions. Like references, function pointers are, among other things, assumed to
+/// not be null, so if you want to pass a function pointer over FFI and be able to accommodate null
+/// pointers, make your type `Option<fn()>` with your required signature.
 ///
 /// Plain function pointers are obtained by casting either plain functions, or closures that don't
 /// capture an environment:
@@ -1048,7 +1091,7 @@ mod prim_ref { }
 /// On top of that, function pointers can vary based on what ABI they use. This is achieved by
 /// adding the `extern` keyword to the type name, followed by the ABI in question. For example,
 /// `fn()` is different from `extern "C" fn()`, which itself is different from `extern "stdcall"
-/// fn()`, and so on for the various ABIs that Rust supports.  Non-`extern` functions have an ABI
+/// fn()`, and so on for the various ABIs that Rust supports. Non-`extern` functions have an ABI
 /// of `"Rust"`, and `extern` functions without an explicit ABI have an ABI of `"C"`. For more
 /// information, see [the nomicon's section on foreign calling conventions][nomicon-abi].
 ///
@@ -1062,10 +1105,6 @@ mod prim_ref { }
 /// [nomicon-variadic]: ../nomicon/ffi.html#variadic-functions
 ///
 /// These markers can be combined, so `unsafe extern "stdcall" fn()` is a valid type.
-///
-/// Like references in rust, function pointers are assumed to not be null, so if you want to pass a
-/// function pointer over FFI and be able to accommodate null pointers, make your type
-/// `Option<fn()>` with your required signature.
 ///
 /// Function pointers implement the following traits:
 ///
@@ -1097,4 +1136,4 @@ mod prim_ref { }
 ///
 /// [`Copy`]: marker/trait.Copy.html
 #[stable(feature = "rust1", since = "1.0.0")]
-mod prim_fn { }
+mod prim_fn {}

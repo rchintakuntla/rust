@@ -1,32 +1,20 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
-#![deny(bare_trait_objects)]
 
-pub use self::IntPredicate::*;
-pub use self::RealPredicate::*;
 pub use self::AtomicRmwBinOp::*;
-pub use self::MetadataType::*;
-pub use self::CodeGenOptSize::*;
 pub use self::CallConv::*;
+pub use self::CodeGenOptSize::*;
+pub use self::IntPredicate::*;
 pub use self::Linkage::*;
+pub use self::MetadataType::*;
+pub use self::RealPredicate::*;
 
+use libc::c_uint;
+use rustc_data_structures::small_c_str::SmallCStr;
+use rustc_llvm::RustString;
+use std::cell::RefCell;
+use std::ffi::CStr;
 use std::str::FromStr;
 use std::string::FromUtf8Error;
-use std::slice;
-use std::ffi::{CString, CStr};
-use std::cell::RefCell;
-use libc::{self, c_uint, c_char, size_t};
 
 pub mod archive_ro;
 pub mod diagnostic;
@@ -43,15 +31,9 @@ impl LLVMRustResult {
     }
 }
 
-pub fn AddFunctionAttrStringValue(llfn: &'a Value,
-                                  idx: AttributePlace,
-                                  attr: &CStr,
-                                  value: &CStr) {
+pub fn AddFunctionAttrStringValue(llfn: &'a Value, idx: AttributePlace, attr: &CStr, value: &CStr) {
     unsafe {
-        LLVMRustAddFunctionAttrStringValue(llfn,
-                                           idx.as_uint(),
-                                           attr.as_ptr(),
-                                           value.as_ptr())
+        LLVMRustAddFunctionAttrStringValue(llfn, idx.as_uint(), attr.as_ptr(), value.as_ptr())
     }
 }
 
@@ -93,21 +75,6 @@ impl FromStr for ArchiveKind {
     }
 }
 
-#[repr(C)]
-pub struct RustString {
-    bytes: RefCell<Vec<u8>>,
-}
-
-/// Appending to a Rust string -- used by RawRustStringOstream.
-#[no_mangle]
-pub unsafe extern "C" fn LLVMRustStringWriteImpl(sr: &RustString,
-                                                 ptr: *const c_char,
-                                                 size: size_t) {
-    let slice = slice::from_raw_parts(ptr as *const u8, size as usize);
-
-    sr.bytes.borrow_mut().extend_from_slice(slice);
-}
-
 pub fn SetInstructionCallConv(instr: &'a Value, cc: CallConv) {
     unsafe {
         LLVMSetInstructionCallConv(instr, cc as c_uint);
@@ -124,10 +91,11 @@ pub fn SetFunctionCallConv(fn_: &'a Value, cc: CallConv) {
 // example happen for generics when using multiple codegen units. This function simply uses the
 // value's name as the comdat value to make sure that it is in a 1-to-1 relationship to the
 // function.
-// For more details on COMDAT sections see e.g. http://www.airs.com/blog/archives/52
+// For more details on COMDAT sections see e.g., http://www.airs.com/blog/archives/52
 pub fn SetUniqueComdat(llmod: &Module, val: &'a Value) {
     unsafe {
-        LLVMRustSetComdat(llmod, val, LLVMGetValueName(val));
+        let name = get_value_name(val);
+        LLVMRustSetComdat(llmod, val, name.as_ptr().cast(), name.len());
     }
 }
 
@@ -189,7 +157,7 @@ impl ObjectFile {
     pub fn new(llmb: &'static mut MemoryBuffer) -> Option<ObjectFile> {
         unsafe {
             let llof = LLVMCreateObjectFile(llmb)?;
-            Some(ObjectFile { llof: llof })
+            Some(ObjectFile { llof })
         }
     }
 }
@@ -223,24 +191,42 @@ pub fn mk_section_iter(llof: &'a ffi::ObjectFile) -> SectionIter<'a> {
 /// Safe wrapper around `LLVMGetParam`, because segfaults are no fun.
 pub fn get_param(llfn: &'a Value, index: c_uint) -> &'a Value {
     unsafe {
-        assert!(index < LLVMCountParams(llfn),
-            "out of bounds argument access: {} out of {} arguments", index, LLVMCountParams(llfn));
+        assert!(
+            index < LLVMCountParams(llfn),
+            "out of bounds argument access: {} out of {} arguments",
+            index,
+            LLVMCountParams(llfn)
+        );
         LLVMGetParam(llfn, index)
     }
 }
 
+/// Safe wrapper for `LLVMGetValueName2` into a byte slice
+pub fn get_value_name(value: &'a Value) -> &'a [u8] {
+    unsafe {
+        let mut len = 0;
+        let data = LLVMGetValueName2(value, &mut len);
+        std::slice::from_raw_parts(data.cast(), len)
+    }
+}
+
+/// Safe wrapper for `LLVMSetValueName2` from a byte slice
+pub fn set_value_name(value: &Value, name: &[u8]) {
+    unsafe {
+        let data = name.as_ptr().cast();
+        LLVMSetValueName2(value, data, name.len());
+    }
+}
+
 pub fn build_string(f: impl FnOnce(&RustString)) -> Result<String, FromUtf8Error> {
-    let sr = RustString {
-        bytes: RefCell::new(Vec::new()),
-    };
+    let sr = RustString { bytes: RefCell::new(Vec::new()) };
     f(&sr);
     String::from_utf8(sr.bytes.into_inner())
 }
 
 pub fn twine_to_string(tr: &Twine) -> String {
     unsafe {
-        build_string(|s| LLVMRustWriteTwineToString(tr, s))
-            .expect("got a non-UTF8 Twine from LLVM")
+        build_string(|s| LLVMRustWriteTwineToString(tr, s)).expect("got a non-UTF8 Twine from LLVM")
     }
 }
 
@@ -264,7 +250,7 @@ pub struct OperandBundleDef<'a> {
 
 impl OperandBundleDef<'a> {
     pub fn new(name: &str, vals: &[&'a Value]) -> Self {
-        let name = CString::new(name).unwrap();
+        let name = SmallCStr::new(name);
         let def = unsafe {
             LLVMRustBuildOperandBundleDef(name.as_ptr(), vals.as_ptr(), vals.len() as c_uint)
         };

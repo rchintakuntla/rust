@@ -1,56 +1,41 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Provider for the `implied_outlives_bounds` query.
 //! Do not call this query directory. See [`rustc::traits::query::implied_outlives_bounds`].
 
-use rustc::infer::InferCtxt;
+use rustc::hir;
 use rustc::infer::canonical::{self, Canonical};
-use rustc::traits::{TraitEngine, TraitEngineExt};
+use rustc::infer::InferCtxt;
 use rustc::traits::query::outlives_bounds::OutlivesBound;
 use rustc::traits::query::{CanonicalTyGoal, Fallible, NoSolution};
-use rustc::ty::{self, Ty, TyCtxt, TypeFoldable};
+use rustc::traits::FulfillmentContext;
+use rustc::traits::{TraitEngine, TraitEngineExt};
 use rustc::ty::outlives::Component;
 use rustc::ty::query::Providers;
 use rustc::ty::wf;
-use syntax::ast::DUMMY_NODE_ID;
-use syntax::codemap::DUMMY_SP;
-use rustc::traits::FulfillmentContext;
+use rustc::ty::{self, Ty, TyCtxt, TypeFoldable};
+use smallvec::{smallvec, SmallVec};
+use syntax::source_map::DUMMY_SP;
 
-use rustc_data_structures::sync::Lrc;
-
-crate fn provide(p: &mut Providers) {
-    *p = Providers {
-        implied_outlives_bounds,
-        ..*p
-    };
+crate fn provide(p: &mut Providers<'_>) {
+    *p = Providers { implied_outlives_bounds, ..*p };
 }
 
 fn implied_outlives_bounds<'tcx>(
-    tcx: TyCtxt<'_, 'tcx, 'tcx>,
+    tcx: TyCtxt<'tcx>,
     goal: CanonicalTyGoal<'tcx>,
 ) -> Result<
-        Lrc<Canonical<'tcx, canonical::QueryResult<'tcx, Vec<OutlivesBound<'tcx>>>>>,
-        NoSolution,
+    &'tcx Canonical<'tcx, canonical::QueryResponse<'tcx, Vec<OutlivesBound<'tcx>>>>,
+    NoSolution,
 > {
-    tcx.infer_ctxt()
-       .enter_canonical_trait_query(&goal, |infcx, _fulfill_cx, key| {
-           let (param_env, ty) = key.into_parts();
-           compute_implied_outlives_bounds(&infcx, param_env, ty)
-       })
+    tcx.infer_ctxt().enter_canonical_trait_query(&goal, |infcx, _fulfill_cx, key| {
+        let (param_env, ty) = key.into_parts();
+        compute_implied_outlives_bounds(&infcx, param_env, ty)
+    })
 }
 
 fn compute_implied_outlives_bounds<'tcx>(
-    infcx: &InferCtxt<'_, '_, 'tcx>,
+    infcx: &InferCtxt<'_, 'tcx>,
     param_env: ty::ParamEnv<'tcx>,
-    ty: Ty<'tcx>
+    ty: Ty<'tcx>,
 ) -> Fallible<Vec<OutlivesBound<'tcx>>> {
     let tcx = infcx.tcx;
 
@@ -74,9 +59,9 @@ fn compute_implied_outlives_bounds<'tcx>(
         // unresolved inference variables here anyway, but there might be
         // during typeck under some circumstances.)
         let obligations =
-            wf::obligations(infcx, param_env, DUMMY_NODE_ID, ty, DUMMY_SP).unwrap_or(vec![]);
+            wf::obligations(infcx, param_env, hir::DUMMY_HIR_ID, ty, DUMMY_SP).unwrap_or(vec![]);
 
-        // NB: All of these predicates *ought* to be easily proven
+        // N.B., all of these predicates *ought* to be easily proven
         // true. In fact, their correctness is (mostly) implied by
         // other parts of the program. However, in #42552, we had
         // an annoying scenario where:
@@ -99,41 +84,39 @@ fn compute_implied_outlives_bounds<'tcx>(
         // to avoids duplicate errors that otherwise show up.
         fulfill_cx.register_predicate_obligations(
             infcx,
-            obligations
-                .iter()
-                .filter(|o| o.predicate.has_infer_types())
-                .cloned(),
+            obligations.iter().filter(|o| o.predicate.has_infer_types()).cloned(),
         );
 
         // From the full set of obligations, just filter down to the
         // region relationships.
         implied_bounds.extend(obligations.into_iter().flat_map(|obligation| {
-            assert!(!obligation.has_escaping_regions());
+            assert!(!obligation.has_escaping_bound_vars());
             match obligation.predicate {
-                ty::Predicate::Trait(..) |
-                ty::Predicate::Subtype(..) |
-                ty::Predicate::Projection(..) |
-                ty::Predicate::ClosureKind(..) |
-                ty::Predicate::ObjectSafe(..) |
-                ty::Predicate::ConstEvaluatable(..) => vec![],
+                ty::Predicate::Trait(..)
+                | ty::Predicate::Subtype(..)
+                | ty::Predicate::Projection(..)
+                | ty::Predicate::ClosureKind(..)
+                | ty::Predicate::ObjectSafe(..)
+                | ty::Predicate::ConstEvaluatable(..) => vec![],
 
                 ty::Predicate::WellFormed(subty) => {
                     wf_types.push(subty);
                     vec![]
                 }
 
-                ty::Predicate::RegionOutlives(ref data) => match data.no_late_bound_regions() {
+                ty::Predicate::RegionOutlives(ref data) => match data.no_bound_vars() {
                     None => vec![],
                     Some(ty::OutlivesPredicate(r_a, r_b)) => {
                         vec![OutlivesBound::RegionSubRegion(r_b, r_a)]
                     }
                 },
 
-                ty::Predicate::TypeOutlives(ref data) => match data.no_late_bound_regions() {
+                ty::Predicate::TypeOutlives(ref data) => match data.no_bound_vars() {
                     None => vec![],
                     Some(ty::OutlivesPredicate(ty_a, r_b)) => {
-                        let ty_a = infcx.resolve_type_vars_if_possible(&ty_a);
-                        let components = tcx.outlives_components(ty_a);
+                        let ty_a = infcx.resolve_vars_if_possible(&ty_a);
+                        let mut components = smallvec![];
+                        tcx.push_outlives_components(ty_a, &mut components);
                         implied_bounds_from_components(r_b, components)
                     }
                 },
@@ -155,18 +138,15 @@ fn compute_implied_outlives_bounds<'tcx>(
 /// those relationships.
 fn implied_bounds_from_components(
     sub_region: ty::Region<'tcx>,
-    sup_components: Vec<Component<'tcx>>,
+    sup_components: SmallVec<[Component<'tcx>; 4]>,
 ) -> Vec<OutlivesBound<'tcx>> {
     sup_components
         .into_iter()
-        .flat_map(|component| {
+        .filter_map(|component| {
             match component {
-                Component::Region(r) =>
-                    vec![OutlivesBound::RegionSubRegion(sub_region, r)],
-                Component::Param(p) =>
-                    vec![OutlivesBound::RegionSubParam(sub_region, p)],
-                Component::Projection(p) =>
-                    vec![OutlivesBound::RegionSubProjection(sub_region, p)],
+                Component::Region(r) => Some(OutlivesBound::RegionSubRegion(sub_region, r)),
+                Component::Param(p) => Some(OutlivesBound::RegionSubParam(sub_region, p)),
+                Component::Projection(p) => Some(OutlivesBound::RegionSubProjection(sub_region, p)),
                 Component::EscapingProjection(_) =>
                 // If the projection has escaping regions, don't
                 // try to infer any implied bounds even for its
@@ -176,9 +156,10 @@ fn implied_bounds_from_components(
                 // idea is that the WAY that the caller proves
                 // that may change in the future and we want to
                 // give ourselves room to get smarter here.
-                    vec![],
-                Component::UnresolvedInferenceVariable(..) =>
-                    vec![],
+                {
+                    None
+                }
+                Component::UnresolvedInferenceVariable(..) => None,
             }
         })
         .collect()

@@ -1,8 +1,8 @@
 # `non_ascii_idents`
 
-The tracking issue for this feature is: [#28979]
+The tracking issue for this feature is: [#55467]
 
-[#28979]: https://github.com/rust-lang/rust/issues/28979
+[#55467]: https://github.com/rust-lang/rust/issues/55467
 
 ------------------------
 
@@ -45,4 +45,4 @@ that does _not_ occur in the set of [strict keywords].
 
 [`XID_start`]:  http://unicode.org/cldr/utility/list-unicodeset.jsp?a=%5B%3AXID_Start%3A%5D&abb=on&g=&i=
 [`XID_continue`]: http://unicode.org/cldr/utility/list-unicodeset.jsp?a=%5B%3AXID_Continue%3A%5D&abb=on&g=&i=
-[strict keywords]: ../reference/keywords.html#strict-keywords
+[strict keywords]: ../../reference/keywords.md#strict-keywords

@@ -1,13 +1,3 @@
-// Copyright 2013 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // Helper functions used only in tests
 
 #include <stdint.h>
@@ -163,11 +153,7 @@ rust_get_null_ptr() {
     return 0;
 }
 
-/* Debug helpers strictly to verify ABI conformance.
- *
- * FIXME (#2665): move these into a testcase when the testsuite
- * understands how to have explicit C files included.
- */
+// Debug helpers strictly to verify ABI conformance.
 
 struct quad {
     uint64_t a;
@@ -229,19 +215,49 @@ uint64_t get_c_many_params(void *a, void *b, void *c, void *d, struct quad f) {
     return f.c;
 }
 
+struct quad_floats {
+    float a;
+    float b;
+    float c;
+    float d;
+};
+
+float get_c_exhaust_sysv64_ints(
+    void *a,
+    void *b,
+    void *c,
+    void *d,
+    void *e,
+    void *f,
+    // `f` used the last integer register, so `g` goes on the stack.
+    // It also used to bring the "count of available integer registers" down to
+    // `-1` which broke the next SSE-only aggregate argument (`h`) - see #62350.
+    void *g,
+    struct quad_floats h
+) {
+    return h.c;
+}
+
 // Calculates the average of `(x + y) / n` where x: i64, y: f64. There must be exactly n pairs
-// passed as variadic arguments.
-double rust_interesting_average(uint64_t n, ...) {
-    va_list pairs;
+// passed as variadic arguments. There are two versions of this function: the
+// variadic one, and the one that takes a `va_list`.
+double rust_valist_interesting_average(uint64_t n, va_list pairs) {
     double sum = 0.0;
     int i;
-    va_start(pairs, n);
     for(i = 0; i < n; i += 1) {
         sum += (double)va_arg(pairs, int64_t);
         sum += va_arg(pairs, double);
     }
-    va_end(pairs);
     return sum / n;
+}
+
+double rust_interesting_average(uint64_t n, ...) {
+    double sum;
+    va_list pairs;
+    va_start(pairs, n);
+    sum = rust_valist_interesting_average(n, pairs);
+    va_end(pairs);
+    return sum;
 }
 
 int32_t rust_int8_to_int32(int8_t x) {

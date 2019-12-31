@@ -1,35 +1,27 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Panic support in the standard library.
 
 #![stable(feature = "std_panic", since = "1.9.0")]
 
-use any::Any;
-use cell::UnsafeCell;
-use fmt;
-use future::Future;
-use mem::PinMut;
-use ops::{Deref, DerefMut};
-use panicking;
-use ptr::{Unique, NonNull};
-use rc::Rc;
-use sync::{Arc, Mutex, RwLock, atomic};
-use task::{self, Poll};
-use thread::Result;
+use crate::any::Any;
+use crate::cell::UnsafeCell;
+use crate::collections;
+use crate::fmt;
+use crate::future::Future;
+use crate::ops::{Deref, DerefMut};
+use crate::panicking;
+use crate::pin::Pin;
+use crate::ptr::{NonNull, Unique};
+use crate::rc::Rc;
+use crate::sync::atomic;
+use crate::sync::{Arc, Mutex, RwLock};
+use crate::task::{Context, Poll};
+use crate::thread::Result;
 
 #[stable(feature = "panic_hooks", since = "1.10.0")]
-pub use panicking::{take_hook, set_hook};
+pub use crate::panicking::{set_hook, take_hook};
 
 #[stable(feature = "panic_hooks", since = "1.10.0")]
-pub use core::panic::{PanicInfo, Location};
+pub use core::panic::{Location, PanicInfo};
 
 /// A marker trait which represents "panic safe" types in Rust.
 ///
@@ -79,8 +71,8 @@ pub use core::panic::{PanicInfo, Location};
 ///
 /// Simply put, a type `T` implements `UnwindSafe` if it cannot easily allow
 /// witnessing a broken invariant through the use of `catch_unwind` (catching a
-/// panic). This trait is a marker trait, so it is automatically implemented for
-/// many types, and it is also structurally composed (e.g. a struct is unwind
+/// panic). This trait is an auto trait, so it is automatically implemented for
+/// many types, and it is also structurally composed (e.g., a struct is unwind
 /// safe if all of its components are unwind safe).
 ///
 /// Note, however, that this is not an unsafe trait, so there is not a succinct
@@ -111,8 +103,8 @@ pub use core::panic::{PanicInfo, Location};
 /// [`AssertUnwindSafe`]: ./struct.AssertUnwindSafe.html
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 #[rustc_on_unimplemented(
-    message="the type `{Self}` may not be safely transferred across an unwind boundary",
-    label="`{Self}` may not be safely transferred across an unwind boundary",
+    message = "the type `{Self}` may not be safely transferred across an unwind boundary",
+    label = "`{Self}` may not be safely transferred across an unwind boundary"
 )]
 pub auto trait UnwindSafe {}
 
@@ -129,10 +121,10 @@ pub auto trait UnwindSafe {}
 /// [`UnwindSafe`]: ./trait.UnwindSafe.html
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 #[rustc_on_unimplemented(
-    message="the type `{Self}` may contain interior mutability and a reference may not be safely \
-             transferrable across a catch_unwind boundary",
-    label="`{Self}` may contain interior mutability and a reference may not be safely \
-           transferrable across a catch_unwind boundary",
+    message = "the type `{Self}` may contain interior mutability and a reference may not be safely \
+               transferrable across a catch_unwind boundary",
+    label = "`{Self}` may contain interior mutability and a reference may not be safely \
+             transferrable across a catch_unwind boundary"
 )]
 pub auto trait RefUnwindSafe {}
 
@@ -195,10 +187,7 @@ pub auto trait RefUnwindSafe {}
 /// // ...
 /// ```
 #[stable(feature = "catch_unwind", since = "1.9.0")]
-pub struct AssertUnwindSafe<T>(
-    #[stable(feature = "catch_unwind", since = "1.9.0")]
-    pub T
-);
+pub struct AssertUnwindSafe<T>(#[stable(feature = "catch_unwind", since = "1.9.0")] pub T);
 
 // Implementations of the `UnwindSafe` trait:
 //
@@ -209,14 +198,14 @@ pub struct AssertUnwindSafe<T>(
 // * Our custom AssertUnwindSafe wrapper is indeed unwind safe
 
 #[stable(feature = "catch_unwind", since = "1.9.0")]
-impl<'a, T: ?Sized> !UnwindSafe for &'a mut T {}
+impl<T: ?Sized> !UnwindSafe for &mut T {}
 #[stable(feature = "catch_unwind", since = "1.9.0")]
-impl<'a, T: RefUnwindSafe + ?Sized> UnwindSafe for &'a T {}
+impl<T: RefUnwindSafe + ?Sized> UnwindSafe for &T {}
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 impl<T: RefUnwindSafe + ?Sized> UnwindSafe for *const T {}
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 impl<T: RefUnwindSafe + ?Sized> UnwindSafe for *mut T {}
-#[unstable(feature = "ptr_internals", issue = "0")]
+#[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: UnwindSafe + ?Sized> UnwindSafe for Unique<T> {}
 #[stable(feature = "nonnull", since = "1.25.0")]
 impl<T: RefUnwindSafe + ?Sized> UnwindSafe for NonNull<T> {}
@@ -249,45 +238,61 @@ impl<T: ?Sized> RefUnwindSafe for Mutex<T> {}
 #[stable(feature = "unwind_safe_lock_refs", since = "1.12.0")]
 impl<T: ?Sized> RefUnwindSafe for RwLock<T> {}
 
-#[cfg(target_has_atomic = "ptr")]
+#[cfg(target_has_atomic_load_store = "ptr")]
 #[stable(feature = "unwind_safe_atomic_refs", since = "1.14.0")]
 impl RefUnwindSafe for atomic::AtomicIsize {}
-#[cfg(target_has_atomic = "8")]
+#[cfg(target_has_atomic_load_store = "8")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicI8 {}
-#[cfg(target_has_atomic = "16")]
+#[cfg(target_has_atomic_load_store = "16")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicI16 {}
-#[cfg(target_has_atomic = "32")]
+#[cfg(target_has_atomic_load_store = "32")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicI32 {}
-#[cfg(target_has_atomic = "64")]
+#[cfg(target_has_atomic_load_store = "64")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicI64 {}
+#[cfg(target_has_atomic_load_store = "128")]
+#[unstable(feature = "integer_atomics", issue = "32976")]
+impl RefUnwindSafe for atomic::AtomicI128 {}
 
-#[cfg(target_has_atomic = "ptr")]
+#[cfg(target_has_atomic_load_store = "ptr")]
 #[stable(feature = "unwind_safe_atomic_refs", since = "1.14.0")]
 impl RefUnwindSafe for atomic::AtomicUsize {}
-#[cfg(target_has_atomic = "8")]
+#[cfg(target_has_atomic_load_store = "8")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicU8 {}
-#[cfg(target_has_atomic = "16")]
+#[cfg(target_has_atomic_load_store = "16")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicU16 {}
-#[cfg(target_has_atomic = "32")]
+#[cfg(target_has_atomic_load_store = "32")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicU32 {}
-#[cfg(target_has_atomic = "64")]
+#[cfg(target_has_atomic_load_store = "64")]
 #[unstable(feature = "integer_atomics", issue = "32976")]
 impl RefUnwindSafe for atomic::AtomicU64 {}
+#[cfg(target_has_atomic_load_store = "128")]
+#[unstable(feature = "integer_atomics", issue = "32976")]
+impl RefUnwindSafe for atomic::AtomicU128 {}
 
-#[cfg(target_has_atomic = "8")]
+#[cfg(target_has_atomic_load_store = "8")]
 #[stable(feature = "unwind_safe_atomic_refs", since = "1.14.0")]
 impl RefUnwindSafe for atomic::AtomicBool {}
 
-#[cfg(target_has_atomic = "ptr")]
+#[cfg(target_has_atomic_load_store = "ptr")]
 #[stable(feature = "unwind_safe_atomic_refs", since = "1.14.0")]
 impl<T> RefUnwindSafe for atomic::AtomicPtr<T> {}
+
+// https://github.com/rust-lang/rust/issues/62301
+#[stable(feature = "hashbrown", since = "1.36.0")]
+impl<K, V, S> UnwindSafe for collections::HashMap<K, V, S>
+where
+    K: UnwindSafe,
+    V: UnwindSafe,
+    S: UnwindSafe,
+{
+}
 
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 impl<T> Deref for AssertUnwindSafe<T> {
@@ -316,20 +321,18 @@ impl<R, F: FnOnce() -> R> FnOnce<()> for AssertUnwindSafe<F> {
 
 #[stable(feature = "std_debug", since = "1.16.0")]
 impl<T: fmt::Debug> fmt::Debug for AssertUnwindSafe<T> {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("AssertUnwindSafe")
-            .field(&self.0)
-            .finish()
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("AssertUnwindSafe").field(&self.0).finish()
     }
 }
 
-#[unstable(feature = "futures_api", issue = "50547")]
-impl<'a, F: Future> Future for AssertUnwindSafe<F> {
+#[stable(feature = "futures_api", since = "1.36.0")]
+impl<F: Future> Future for AssertUnwindSafe<F> {
     type Output = F::Output;
 
-    fn poll(self: PinMut<Self>, cx: &mut task::Context) -> Poll<Self::Output> {
-        let pinned_field = unsafe { PinMut::map_unchecked(self, |x| &mut x.0) };
-        pinned_field.poll(cx)
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let pinned_field = unsafe { Pin::map_unchecked_mut(self, |x| &mut x.0) };
+        F::poll(pinned_field, cx)
     }
 }
 
@@ -388,9 +391,7 @@ impl<'a, F: Future> Future for AssertUnwindSafe<F> {
 /// ```
 #[stable(feature = "catch_unwind", since = "1.9.0")]
 pub fn catch_unwind<F: FnOnce() -> R + UnwindSafe, R>(f: F) -> Result<R> {
-    unsafe {
-        panicking::try(f)
-    }
+    unsafe { panicking::r#try(f) }
 }
 
 /// Triggers a panic without invoking the panic hook.
@@ -422,5 +423,5 @@ pub fn catch_unwind<F: FnOnce() -> R + UnwindSafe, R>(f: F) -> Result<R> {
 /// ```
 #[stable(feature = "resume_unwind", since = "1.9.0")]
 pub fn resume_unwind(payload: Box<dyn Any + Send>) -> ! {
-    panicking::update_count_then_panic(payload)
+    panicking::rust_panic_without_hook(payload)
 }

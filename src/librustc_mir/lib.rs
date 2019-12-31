@@ -1,86 +1,68 @@
-// Copyright 2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 /*!
 
 Rust MIR: a lowered representation of Rust. Also: an experiment!
 
 */
 
-#![feature(infer_outlives_requirements)]
+#![feature(nll)]
 #![feature(in_band_lifetimes)]
+#![feature(inner_deref)]
 #![feature(slice_patterns)]
-#![feature(slice_sort_by_cached_key)]
+#![feature(bool_to_option)]
 #![feature(box_patterns)]
 #![feature(box_syntax)]
-#![feature(catch_expr)]
 #![feature(crate_visibility_modifier)]
-#![feature(const_fn)]
 #![feature(core_intrinsics)]
+#![feature(const_fn)]
 #![feature(decl_macro)]
-#![feature(macro_vis_matcher)]
+#![feature(drain_filter)]
 #![feature(exhaustive_patterns)]
-#![feature(range_contains)]
-#![feature(rustc_diagnostic_macros)]
+#![feature(iter_order_by)]
 #![feature(never_type)]
 #![feature(specialization)]
 #![feature(try_trait)]
 #![feature(unicode_internals)]
-#![feature(step_trait)]
-
-#![recursion_limit="256"]
-
-extern crate arena;
+#![feature(slice_concat_ext)]
+#![feature(trusted_len)]
+#![feature(try_blocks)]
+#![feature(associated_type_bounds)]
+#![feature(range_is_empty)]
+#![feature(stmt_expr_attributes)]
+#![feature(trait_alias)]
+#![recursion_limit = "256"]
 
 #[macro_use]
-extern crate bitflags;
-#[macro_use] extern crate log;
-extern crate either;
-extern crate graphviz as dot;
-extern crate polonius_engine;
+extern crate log;
 #[macro_use]
 extern crate rustc;
-#[macro_use] extern crate rustc_data_structures;
-extern crate serialize as rustc_serialize;
-extern crate rustc_errors;
 #[macro_use]
 extern crate syntax;
-extern crate syntax_pos;
-extern crate rustc_target;
-extern crate log_settings;
-extern crate rustc_apfloat;
-extern crate byteorder;
-extern crate core;
-
-mod diagnostics;
 
 mod borrow_check;
 mod build;
-mod dataflow;
+pub mod const_eval;
+pub mod dataflow;
 mod hair;
+pub mod interpret;
+mod lints;
+pub mod monomorphize;
 mod shim;
 pub mod transform;
 pub mod util;
-pub mod interpret;
-pub mod monomorphize;
 
-pub use hair::pattern::check_crate as matchck_crate;
 use rustc::ty::query::Providers;
 
-pub fn provide(providers: &mut Providers) {
+pub fn provide(providers: &mut Providers<'_>) {
     borrow_check::provide(providers);
     shim::provide(providers);
     transform::provide(providers);
-    providers.const_eval = interpret::const_eval_provider;
-    providers.const_value_to_allocation = interpret::const_value_to_allocation_provider;
+    monomorphize::partitioning::provide(providers);
+    providers.const_eval_validated = const_eval::const_eval_validated_provider;
+    providers.const_eval_raw = const_eval::const_eval_raw_provider;
     providers.check_match = hair::pattern::check_match;
+    providers.const_caller_location = const_eval::const_caller_location;
+    providers.const_field = |tcx, param_env_and_value| {
+        let (param_env, (value, field)) = param_env_and_value.into_parts();
+        const_eval::const_field(tcx, param_env, None, field, value)
+    };
 }
-
-__build_diagnostic_array! { librustc_mir, DIAGNOSTICS }

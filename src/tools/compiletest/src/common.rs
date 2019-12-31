@@ -1,29 +1,21 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
 pub use self::Mode::*;
 
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
+use crate::util::PathBufExt;
 use test::ColorConfig;
-use util::PathBufExt;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Mode {
     CompileFail,
-    ParseFail,
     RunFail,
-    RunPass,
     RunPassValgrind,
     Pretty,
+    DebugInfoCdb,
+    DebugInfoGdbLldb,
     DebugInfoGdb,
     DebugInfoLldb,
     Codegen,
@@ -32,16 +24,19 @@ pub enum Mode {
     Incremental,
     RunMake,
     Ui,
+    JsDocTest,
     MirOpt,
+    Assembly,
 }
 
 impl Mode {
     pub fn disambiguator(self) -> &'static str {
-        // Run-pass and pretty run-pass tests could run concurrently, and if they do,
+        // Pretty-printing tests could run concurrently, and if they do,
         // they need to keep their output segregated. Same is true for debuginfo tests that
-        // can be run both on gdb and lldb.
+        // can be run on cdb, gdb, and lldb.
         match self {
             Pretty => ".pretty",
+            DebugInfoCdb => ".cdb",
             DebugInfoGdb => ".gdb",
             DebugInfoLldb => ".lldb",
             _ => "",
@@ -54,11 +49,11 @@ impl FromStr for Mode {
     fn from_str(s: &str) -> Result<Mode, ()> {
         match s {
             "compile-fail" => Ok(CompileFail),
-            "parse-fail" => Ok(ParseFail),
             "run-fail" => Ok(RunFail),
-            "run-pass" => Ok(RunPass),
             "run-pass-valgrind" => Ok(RunPassValgrind),
             "pretty" => Ok(Pretty),
+            "debuginfo-cdb" => Ok(DebugInfoCdb),
+            "debuginfo-gdb+lldb" => Ok(DebugInfoGdbLldb),
             "debuginfo-lldb" => Ok(DebugInfoLldb),
             "debuginfo-gdb" => Ok(DebugInfoGdb),
             "codegen" => Ok(Codegen),
@@ -67,21 +62,23 @@ impl FromStr for Mode {
             "incremental" => Ok(Incremental),
             "run-make" => Ok(RunMake),
             "ui" => Ok(Ui),
+            "js-doc-test" => Ok(JsDocTest),
             "mir-opt" => Ok(MirOpt),
+            "assembly" => Ok(Assembly),
             _ => Err(()),
         }
     }
 }
 
 impl fmt::Display for Mode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let s = match *self {
             CompileFail => "compile-fail",
-            ParseFail => "parse-fail",
             RunFail => "run-fail",
-            RunPass => "run-pass",
             RunPassValgrind => "run-pass-valgrind",
             Pretty => "pretty",
+            DebugInfoCdb => "debuginfo-cdb",
+            DebugInfoGdbLldb => "debuginfo-gdb+lldb",
             DebugInfoGdb => "debuginfo-gdb",
             DebugInfoLldb => "debuginfo-lldb",
             Codegen => "codegen",
@@ -90,13 +87,52 @@ impl fmt::Display for Mode {
             Incremental => "incremental",
             RunMake => "run-make",
             Ui => "ui",
+            JsDocTest => "js-doc-test",
             MirOpt => "mir-opt",
+            Assembly => "assembly",
         };
         fmt::Display::fmt(s, f)
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug, Hash)]
+pub enum PassMode {
+    Check,
+    Build,
+    Run,
+}
+
+impl FromStr for PassMode {
+    type Err = ();
+    fn from_str(s: &str) -> Result<Self, ()> {
+        match s {
+            "check" => Ok(PassMode::Check),
+            "build" => Ok(PassMode::Build),
+            "run" => Ok(PassMode::Run),
+            _ => Err(()),
+        }
+    }
+}
+
+impl fmt::Display for PassMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match *self {
+            PassMode::Check => "check",
+            PassMode::Build => "build",
+            PassMode::Run => "run",
+        };
+        fmt::Display::fmt(s, f)
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, PartialOrd)]
+pub enum FailMode {
+    Check,
+    Build,
+    Run,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum CompareMode {
     Nll,
     Polonius,
@@ -119,38 +155,46 @@ impl CompareMode {
     }
 }
 
+/// Configuration for compiletest
 #[derive(Clone)]
 pub struct Config {
-    /// Whether to overwrite stderr/stdout files instead of complaining about changes in output
+    /// `true` to to overwrite stderr/stdout files instead of complaining about changes in output.
     pub bless: bool,
 
-    /// The library paths required for running the compiler
+    /// The library paths required for running the compiler.
     pub compile_lib_path: PathBuf,
 
-    /// The library paths required for running compiled programs
+    /// The library paths required for running compiled programs.
     pub run_lib_path: PathBuf,
 
-    /// The rustc executable
+    /// The rustc executable.
     pub rustc_path: PathBuf,
 
-    /// The rustdoc executable
+    /// The rustdoc executable.
     pub rustdoc_path: Option<PathBuf>,
 
-    /// The python executable to use for LLDB
+    /// The Python executable to use for LLDB.
     pub lldb_python: String,
 
-    /// The python executable to use for htmldocck
+    /// The Python executable to use for htmldocck.
     pub docck_python: String,
 
-    /// The llvm FileCheck binary path
+    /// The LLVM `FileCheck` binary path.
     pub llvm_filecheck: Option<PathBuf>,
 
-    /// The valgrind path
+    /// Path to LLVM's bin directory.
+    pub llvm_bin_dir: Option<PathBuf>,
+
+    /// The valgrind path.
     pub valgrind_path: Option<String>,
 
     /// Whether to fail if we can't run run-pass-valgrind tests under valgrind
     /// (or, alternatively, to silently run them like regular run-pass tests).
     pub force_valgrind: bool,
+
+    /// The path to the Clang executable to run Clang-based tests with. If
+    /// `None` then these tests will be ignored.
+    pub run_clang_based_tests_with: Option<String>,
 
     /// The directory containing the tests to run
     pub src_base: PathBuf,
@@ -161,7 +205,7 @@ pub struct Config {
     /// The name of the stage being built (stage1, etc)
     pub stage_id: String,
 
-    /// The test mode, compile-fail, run-fail, run-pass
+    /// The test mode, compile-fail, run-fail, ui
     pub mode: Mode,
 
     /// Run ignored tests
@@ -172,6 +216,9 @@ pub struct Config {
 
     /// Exactly match the filter, rather than a substring
     pub filter_exact: bool,
+
+    /// Force the pass mode of a check/build/run-pass test to this mode.
+    pub force_pass_mode: Option<PassMode>,
 
     /// Write out a parseable log of tests that were run
     pub logfile: Option<PathBuf>,
@@ -192,6 +239,9 @@ pub struct Config {
     /// Host triple for the compiler being invoked
     pub host: String,
 
+    /// Path to / name of the Microsoft Console Debugger (CDB) executable
+    pub cdb: Option<OsString>,
+
     /// Path to / name of the GDB executable
     pub gdb: Option<String>,
 
@@ -203,6 +253,9 @@ pub struct Config {
 
     /// Version of LLDB
     pub lldb_version: Option<String>,
+
+    /// Whether LLDB has native rust support
+    pub lldb_native_rust: bool,
 
     /// Version of LLVM
     pub llvm_version: Option<String>,
@@ -240,6 +293,11 @@ pub struct Config {
     /// mode describing what file the actual ui output will be compared to
     pub compare_mode: Option<CompareMode>,
 
+    /// If true, this will generate a coverage file with UI test files that run `MachineApplicable`
+    /// diagnostics but are missing `run-rustfix` annotations. The generated coverage file is
+    /// created in `/<build_base>/rustfix_missing_coverage.txt`
+    pub rustfix_coverage: bool,
+
     // Configuration for various run-make tests frobbing things like C compilers
     // or querying about various LLVM component information.
     pub cc: String,
@@ -249,6 +307,8 @@ pub struct Config {
     pub linker: Option<String>,
     pub llvm_components: String,
     pub llvm_cxxflags: String,
+
+    /// Path to a NodeJS executable. Used for JS doctests, emscripten and WASM tests
     pub nodejs: Option<String>,
 }
 
@@ -280,10 +340,12 @@ pub fn expected_output_path(
     testpaths.file.with_extension(extension)
 }
 
-pub const UI_EXTENSIONS: &[&str] = &[UI_STDERR, UI_STDOUT, UI_FIXED];
+pub const UI_EXTENSIONS: &[&str] = &[UI_STDERR, UI_STDOUT, UI_FIXED, UI_RUN_STDERR, UI_RUN_STDOUT];
 pub const UI_STDERR: &str = "stderr";
 pub const UI_STDOUT: &str = "stdout";
 pub const UI_FIXED: &str = "fixed";
+pub const UI_RUN_STDERR: &str = "run.stderr";
+pub const UI_RUN_STDOUT: &str = "run.stdout";
 
 /// Absolute path to the directory where all output for all tests in the given
 /// `relative_dir` group should reside. Example:
@@ -306,7 +368,7 @@ pub fn output_testname_unique(
 }
 
 /// Absolute path to the directory where all output for the given
-/// test/revision should reside.  Example:
+/// test/revision should reside. Example:
 ///   /path/to/build/host-triple/test/ui/relative/testname.revision.mode/
 pub fn output_base_dir(config: &Config, testpaths: &TestPaths, revision: Option<&str>) -> PathBuf {
     output_relative_path(config, &testpaths.relative_dir)
@@ -314,7 +376,7 @@ pub fn output_base_dir(config: &Config, testpaths: &TestPaths, revision: Option<
 }
 
 /// Absolute path to the base filename used as output for the given
-/// test/revision.  Example:
+/// test/revision. Example:
 ///   /path/to/build/host-triple/test/ui/relative/testname.revision.mode/testname
 pub fn output_base_name(config: &Config, testpaths: &TestPaths, revision: Option<&str>) -> PathBuf {
     output_base_dir(config, testpaths, revision).join(testpaths.file.file_stem().unwrap())

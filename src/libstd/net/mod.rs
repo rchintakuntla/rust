@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Networking primitives for TCP/UDP communication.
 //!
 //! This module provides networking functionality for the Transmission Control and User
@@ -38,26 +28,26 @@
 
 #![stable(feature = "rust1", since = "1.0.0")]
 
-use io::{self, Error, ErrorKind};
+use crate::io::{self, Error, ErrorKind};
 
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use self::ip::{IpAddr, Ipv4Addr, Ipv6Addr, Ipv6MulticastScope};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::addr::{SocketAddr, SocketAddrV4, SocketAddrV6, ToSocketAddrs};
 #[stable(feature = "rust1", since = "1.0.0")]
-pub use self::tcp::{TcpStream, TcpListener, Incoming};
-#[stable(feature = "rust1", since = "1.0.0")]
-pub use self::udp::UdpSocket;
+pub use self::ip::{IpAddr, Ipv4Addr, Ipv6Addr, Ipv6MulticastScope};
 #[stable(feature = "rust1", since = "1.0.0")]
 pub use self::parser::AddrParseError;
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::tcp::{Incoming, TcpListener, TcpStream};
+#[stable(feature = "rust1", since = "1.0.0")]
+pub use self::udp::UdpSocket;
 
-mod ip;
 mod addr;
-mod tcp;
-mod udp;
+mod ip;
 mod parser;
+mod tcp;
 #[cfg(test)]
 mod test;
+mod udp;
 
 /// Possible values which can be passed to the [`shutdown`] method of
 /// [`TcpStream`].
@@ -95,34 +85,31 @@ pub enum Shutdown {
     Both,
 }
 
-#[doc(hidden)]
-trait NetInt {
-    fn from_be(i: Self) -> Self;
-    fn to_be(&self) -> Self;
+#[inline]
+const fn htons(i: u16) -> u16 {
+    i.to_be()
 }
-macro_rules! doit {
-    ($($t:ident)*) => ($(impl NetInt for $t {
-        fn from_be(i: Self) -> Self { <$t>::from_be(i) }
-        fn to_be(&self) -> Self { <$t>::to_be(*self) }
-    })*)
+#[inline]
+const fn ntohs(i: u16) -> u16 {
+    u16::from_be(i)
 }
-doit! { i8 i16 i32 i64 isize u8 u16 u32 u64 usize }
-
-fn hton<I: NetInt>(i: I) -> I { i.to_be() }
-fn ntoh<I: NetInt>(i: I) -> I { I::from_be(i) }
 
 fn each_addr<A: ToSocketAddrs, F, T>(addr: A, mut f: F) -> io::Result<T>
-    where F: FnMut(&SocketAddr) -> io::Result<T>
+where
+    F: FnMut(io::Result<&SocketAddr>) -> io::Result<T>,
 {
+    let addrs = match addr.to_socket_addrs() {
+        Ok(addrs) => addrs,
+        Err(e) => return f(Err(e)),
+    };
     let mut last_err = None;
-    for addr in addr.to_socket_addrs()? {
-        match f(&addr) {
+    for addr in addrs {
+        match f(Ok(&addr)) {
             Ok(l) => return Ok(l),
             Err(e) => last_err = Some(e),
         }
     }
     Err(last_err.unwrap_or_else(|| {
-        Error::new(ErrorKind::InvalidInput,
-                   "could not resolve to any addresses")
+        Error::new(ErrorKind::InvalidInput, "could not resolve to any addresses")
     }))
 }

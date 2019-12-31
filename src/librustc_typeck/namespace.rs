@@ -1,13 +1,3 @@
-// Copyright 2017 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 use rustc::hir;
 use rustc::ty;
 
@@ -18,24 +8,20 @@ pub enum Namespace {
     Value,
 }
 
-impl From<ty::AssociatedKind> for Namespace {
-    fn from(a_kind: ty::AssociatedKind) -> Self {
+impl From<ty::AssocKind> for Namespace {
+    fn from(a_kind: ty::AssocKind) -> Self {
         match a_kind {
-            ty::AssociatedKind::Existential |
-            ty::AssociatedKind::Type => Namespace::Type,
-            ty::AssociatedKind::Const |
-            ty::AssociatedKind::Method => Namespace::Value,
+            ty::AssocKind::OpaqueTy | ty::AssocKind::Type => Namespace::Type,
+            ty::AssocKind::Const | ty::AssocKind::Method => Namespace::Value,
         }
     }
 }
 
-impl<'a> From <&'a hir::ImplItemKind> for Namespace {
-    fn from(impl_kind: &'a hir::ImplItemKind) -> Self {
+impl<'a> From<&'a hir::ImplItemKind<'_>> for Namespace {
+    fn from(impl_kind: &'a hir::ImplItemKind<'_>) -> Self {
         match *impl_kind {
-            hir::ImplItemKind::Existential(..) |
-            hir::ImplItemKind::Type(..) => Namespace::Type,
-            hir::ImplItemKind::Const(..) |
-            hir::ImplItemKind::Method(..) => Namespace::Value,
+            hir::ImplItemKind::OpaqueTy(..) | hir::ImplItemKind::TyAlias(..) => Namespace::Type,
+            hir::ImplItemKind::Const(..) | hir::ImplItemKind::Method(..) => Namespace::Value,
         }
     }
 }

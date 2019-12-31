@@ -1,13 +1,3 @@
-// Copyright 2014-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Memory allocation APIs
 
 #![stable(feature = "alloc_module", since = "1.28.0")]
@@ -20,17 +10,21 @@ use core::usize;
 #[doc(inline)]
 pub use core::alloc::*;
 
+#[cfg(test)]
+mod tests;
+
 extern "Rust" {
-    #[allocator]
+    // These are the magic symbols to call the global allocator.  rustc generates
+    // them from the `#[global_allocator]` attribute if there is one, or uses the
+    // default implementations in libstd (`__rdl_alloc` etc in `src/libstd/alloc.rs`)
+    // otherwise.
+    #[rustc_allocator]
     #[rustc_allocator_nounwind]
     fn __rust_alloc(size: usize, align: usize) -> *mut u8;
     #[rustc_allocator_nounwind]
     fn __rust_dealloc(ptr: *mut u8, size: usize, align: usize);
     #[rustc_allocator_nounwind]
-    fn __rust_realloc(ptr: *mut u8,
-                      old_size: usize,
-                      align: usize,
-                      new_size: usize) -> *mut u8;
+    fn __rust_realloc(ptr: *mut u8, old_size: usize, align: usize, new_size: usize) -> *mut u8;
     #[rustc_allocator_nounwind]
     fn __rust_alloc_zeroed(size: usize, align: usize) -> *mut u8;
 }
@@ -40,6 +34,11 @@ extern "Rust" {
 /// This type implements the [`Alloc`] trait by forwarding calls
 /// to the allocator registered with the `#[global_allocator]` attribute
 /// if there is one, or the `std` crate’s default.
+///
+/// Note: while this type is unstable, the functionality it provides can be
+/// accessed through the [free functions in `alloc`](index.html#functions).
+///
+/// [`Alloc`]: trait.Alloc.html
 #[unstable(feature = "allocator_api", issue = "32838")]
 #[derive(Copy, Clone, Default, Debug)]
 pub struct Global;
@@ -56,6 +55,26 @@ pub struct Global;
 /// # Safety
 ///
 /// See [`GlobalAlloc::alloc`].
+///
+/// [`Global`]: struct.Global.html
+/// [`Alloc`]: trait.Alloc.html
+/// [`GlobalAlloc::alloc`]: trait.GlobalAlloc.html#tymethod.alloc
+///
+/// # Examples
+///
+/// ```
+/// use std::alloc::{alloc, dealloc, Layout};
+///
+/// unsafe {
+///     let layout = Layout::new::<u16>();
+///     let ptr = alloc(layout);
+///
+///     *(ptr as *mut u16) = 42;
+///     assert_eq!(*(ptr as *mut u16), 42);
+///
+///     dealloc(ptr, layout);
+/// }
+/// ```
 #[stable(feature = "global_alloc", since = "1.28.0")]
 #[inline]
 pub unsafe fn alloc(layout: Layout) -> *mut u8 {
@@ -74,6 +93,10 @@ pub unsafe fn alloc(layout: Layout) -> *mut u8 {
 /// # Safety
 ///
 /// See [`GlobalAlloc::dealloc`].
+///
+/// [`Global`]: struct.Global.html
+/// [`Alloc`]: trait.Alloc.html
+/// [`GlobalAlloc::dealloc`]: trait.GlobalAlloc.html#tymethod.dealloc
 #[stable(feature = "global_alloc", since = "1.28.0")]
 #[inline]
 pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
@@ -92,6 +115,10 @@ pub unsafe fn dealloc(ptr: *mut u8, layout: Layout) {
 /// # Safety
 ///
 /// See [`GlobalAlloc::realloc`].
+///
+/// [`Global`]: struct.Global.html
+/// [`Alloc`]: trait.Alloc.html
+/// [`GlobalAlloc::realloc`]: trait.GlobalAlloc.html#method.realloc
 #[stable(feature = "global_alloc", since = "1.28.0")]
 #[inline]
 pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
@@ -110,6 +137,25 @@ pub unsafe fn realloc(ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 
 /// # Safety
 ///
 /// See [`GlobalAlloc::alloc_zeroed`].
+///
+/// [`Global`]: struct.Global.html
+/// [`Alloc`]: trait.Alloc.html
+/// [`GlobalAlloc::alloc_zeroed`]: trait.GlobalAlloc.html#method.alloc_zeroed
+///
+/// # Examples
+///
+/// ```
+/// use std::alloc::{alloc_zeroed, dealloc, Layout};
+///
+/// unsafe {
+///     let layout = Layout::new::<u16>();
+///     let ptr = alloc_zeroed(layout);
+///
+///     assert_eq!(*(ptr as *mut u16), 0);
+///
+///     dealloc(ptr, layout);
+/// }
+/// ```
 #[stable(feature = "global_alloc", since = "1.28.0")]
 #[inline]
 pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
@@ -129,12 +175,12 @@ unsafe impl Alloc for Global {
     }
 
     #[inline]
-    unsafe fn realloc(&mut self,
-                      ptr: NonNull<u8>,
-                      layout: Layout,
-                      new_size: usize)
-                      -> Result<NonNull<u8>, AllocErr>
-    {
+    unsafe fn realloc(
+        &mut self,
+        ptr: NonNull<u8>,
+        layout: Layout,
+        new_size: usize,
+    ) -> Result<NonNull<u8>, AllocErr> {
         NonNull::new(realloc(ptr.as_ptr(), layout, new_size)).ok_or(AllocErr)
     }
 
@@ -155,11 +201,7 @@ unsafe fn exchange_malloc(size: usize, align: usize) -> *mut u8 {
     } else {
         let layout = Layout::from_size_align_unchecked(size, align);
         let ptr = alloc(layout);
-        if !ptr.is_null() {
-            ptr
-        } else {
-            handle_alloc_error(layout)
-        }
+        if !ptr.is_null() { ptr } else { handle_alloc_error(layout) }
     }
 }
 
@@ -191,42 +233,9 @@ pub(crate) unsafe fn box_free<T: ?Sized>(ptr: Unique<T>) {
 #[stable(feature = "global_alloc", since = "1.28.0")]
 #[rustc_allocator_nounwind]
 pub fn handle_alloc_error(layout: Layout) -> ! {
-    #[allow(improper_ctypes)]
     extern "Rust" {
         #[lang = "oom"]
         fn oom_impl(layout: Layout) -> !;
     }
     unsafe { oom_impl(layout) }
-}
-
-#[cfg(test)]
-mod tests {
-    extern crate test;
-    use self::test::Bencher;
-    use boxed::Box;
-    use alloc::{Global, Alloc, Layout, handle_alloc_error};
-
-    #[test]
-    fn allocate_zeroed() {
-        unsafe {
-            let layout = Layout::from_size_align(1024, 1).unwrap();
-            let ptr = Global.alloc_zeroed(layout.clone())
-                .unwrap_or_else(|_| handle_alloc_error(layout));
-
-            let mut i = ptr.cast::<u8>().as_ptr();
-            let end = i.offset(layout.size() as isize);
-            while i < end {
-                assert_eq!(*i, 0);
-                i = i.offset(1);
-            }
-            Global.dealloc(ptr, layout);
-        }
-    }
-
-    #[bench]
-    fn alloc_owned_small(b: &mut Bencher) {
-        b.iter(|| {
-            let _: Box<_> = box 10;
-        })
-    }
 }

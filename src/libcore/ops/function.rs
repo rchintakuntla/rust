@@ -1,23 +1,13 @@
-// Copyright 2012 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 /// The version of the call operator that takes an immutable receiver.
 ///
 /// Instances of `Fn` can be called repeatedly without mutating state.
 ///
-/// *This trait (`Fn`) is not to be confused with [function pointers][]
+/// *This trait (`Fn`) is not to be confused with [function pointers]
 /// (`fn`).*
 ///
 /// `Fn` is implemented automatically by closures which only take immutable
 /// references to captured variables or don't capture anything at all, as well
-/// as (safe) [function pointers][] (with some caveats, see their documentation
+/// as (safe) [function pointers] (with some caveats, see their documentation
 /// for more details). Additionally, for any type `F` that implements `Fn`, `&F`
 /// implements `Fn`, too.
 ///
@@ -26,7 +16,7 @@
 /// is expected.
 ///
 /// Use `Fn` as a bound when you want to accept a parameter of function-like
-/// type and need to call it repeatedly and without mutating state (e.g. when
+/// type and need to call it repeatedly and without mutating state (e.g., when
 /// calling it concurrently). If you do not need such strict requirements, use
 /// [`FnMut`] or [`FnOnce`] as bounds.
 ///
@@ -37,7 +27,7 @@
 /// `Fn(usize, bool) -> usize`). Those interested in the technical details of
 /// this can refer to [the relevant section in the *Rustonomicon*][nomicon].
 ///
-/// [book]: ../../book/second-edition/ch13-01-closures.html
+/// [book]: ../../book/ch13-01-closures.html
 /// [`FnMut`]: trait.FnMut.html
 /// [`FnOnce`]: trait.FnOnce.html
 /// [function pointers]: ../../std/primitive.fn.html
@@ -66,8 +56,17 @@
 #[lang = "fn"]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_paren_sugar]
+#[rustc_on_unimplemented(
+    on(
+        Args = "()",
+        note = "wrap the `{Self}` in a closure with no arguments: `|| {{ /* code */ }}"
+    ),
+    message = "expected a `{Fn}<{Args}>` closure, found `{Self}`",
+    label = "expected an `Fn<{Args}>` closure, found `{Self}`"
+)]
 #[fundamental] // so that regex can rely that `&str: !FnMut`
-pub trait Fn<Args> : FnMut<Args> {
+#[must_use = "closures are lazy and do nothing unless called"]
+pub trait Fn<Args>: FnMut<Args> {
     /// Performs the call operation.
     #[unstable(feature = "fn_traits", issue = "29625")]
     extern "rust-call" fn call(&self, args: Args) -> Self::Output;
@@ -79,7 +78,7 @@ pub trait Fn<Args> : FnMut<Args> {
 ///
 /// `FnMut` is implemented automatically by closures which take mutable
 /// references to captured variables, as well as all types that implement
-/// [`Fn`], e.g. (safe) [function pointers][] (since `FnMut` is a supertrait of
+/// [`Fn`], e.g., (safe) [function pointers] (since `FnMut` is a supertrait of
 /// [`Fn`]). Additionally, for any type `F` that implements `FnMut`, `&mut F`
 /// implements `FnMut`, too.
 ///
@@ -99,7 +98,7 @@ pub trait Fn<Args> : FnMut<Args> {
 /// `Fn(usize, bool) -> usize`). Those interested in the technical details of
 /// this can refer to [the relevant section in the *Rustonomicon*][nomicon].
 ///
-/// [book]: ../../book/second-edition/ch13-01-closures.html
+/// [book]: ../../book/ch13-01-closures.html
 /// [`Fn`]: trait.Fn.html
 /// [`FnOnce`]: trait.FnOnce.html
 /// [function pointers]: ../../std/primitive.fn.html
@@ -139,8 +138,17 @@ pub trait Fn<Args> : FnMut<Args> {
 #[lang = "fn_mut"]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_paren_sugar]
+#[rustc_on_unimplemented(
+    on(
+        Args = "()",
+        note = "wrap the `{Self}` in a closure with no arguments: `|| {{ /* code */ }}"
+    ),
+    message = "expected a `{FnMut}<{Args}>` closure, found `{Self}`",
+    label = "expected an `FnMut<{Args}>` closure, found `{Self}`"
+)]
 #[fundamental] // so that regex can rely that `&str: !FnMut`
-pub trait FnMut<Args> : FnOnce<Args> {
+#[must_use = "closures are lazy and do nothing unless called"]
+pub trait FnMut<Args>: FnOnce<Args> {
     /// Performs the call operation.
     #[unstable(feature = "fn_traits", issue = "29625")]
     extern "rust-call" fn call_mut(&mut self, args: Args) -> Self::Output;
@@ -153,8 +161,8 @@ pub trait FnMut<Args> : FnOnce<Args> {
 /// implements `FnOnce`, it can only be called once.
 ///
 /// `FnOnce` is implemented automatically by closure that might consume captured
-/// variables, as well as all types that implement [`FnMut`], e.g. (safe)
-/// [function pointers][] (since `FnOnce` is a supertrait of [`FnMut`]).
+/// variables, as well as all types that implement [`FnMut`], e.g., (safe)
+/// [function pointers] (since `FnOnce` is a supertrait of [`FnMut`]).
 ///
 /// Since both [`Fn`] and [`FnMut`] are subtraits of `FnOnce`, any instance of
 /// [`Fn`] or [`FnMut`] can be used where a `FnOnce` is expected.
@@ -171,21 +179,13 @@ pub trait FnMut<Args> : FnOnce<Args> {
 /// `Fn(usize, bool) -> usize`). Those interested in the technical details of
 /// this can refer to [the relevant section in the *Rustonomicon*][nomicon].
 ///
-/// [book]: ../../book/second-edition/ch13-01-closures.html
+/// [book]: ../../book/ch13-01-closures.html
 /// [`Fn`]: trait.Fn.html
 /// [`FnMut`]: trait.FnMut.html
 /// [function pointers]: ../../std/primitive.fn.html
 /// [nomicon]: ../../nomicon/hrtb.html
 ///
 /// # Examples
-///
-/// ## Calling a by-value closure
-///
-/// ```
-/// let x = 5;
-/// let square_x = move || x * x;
-/// assert_eq!(square_x(), 25);
-/// ```
 ///
 /// ## Using a `FnOnce` parameter
 ///
@@ -212,7 +212,16 @@ pub trait FnMut<Args> : FnOnce<Args> {
 #[lang = "fn_once"]
 #[stable(feature = "rust1", since = "1.0.0")]
 #[rustc_paren_sugar]
+#[rustc_on_unimplemented(
+    on(
+        Args = "()",
+        note = "wrap the `{Self}` in a closure with no arguments: `|| {{ /* code */ }}"
+    ),
+    message = "expected a `{FnOnce}<{Args}>` closure, found `{Self}`",
+    label = "expected an `FnOnce<{Args}>` closure, found `{Self}`"
+)]
 #[fundamental] // so that regex can rely that `&str: !FnMut`
+#[must_use = "closures are lazy and do nothing unless called"]
 pub trait FnOnce<Args> {
     /// The returned type after the call operator is used.
     #[stable(feature = "fn_once_output", since = "1.12.0")]
@@ -225,8 +234,9 @@ pub trait FnOnce<Args> {
 
 mod impls {
     #[stable(feature = "rust1", since = "1.0.0")]
-    impl<'a,A,F:?Sized> Fn<A> for &'a F
-        where F : Fn<A>
+    impl<A, F: ?Sized> Fn<A> for &F
+    where
+        F: Fn<A>,
     {
         extern "rust-call" fn call(&self, args: A) -> F::Output {
             (**self).call(args)
@@ -234,8 +244,9 @@ mod impls {
     }
 
     #[stable(feature = "rust1", since = "1.0.0")]
-    impl<'a,A,F:?Sized> FnMut<A> for &'a F
-        where F : Fn<A>
+    impl<A, F: ?Sized> FnMut<A> for &F
+    where
+        F: Fn<A>,
     {
         extern "rust-call" fn call_mut(&mut self, args: A) -> F::Output {
             (**self).call(args)
@@ -243,8 +254,9 @@ mod impls {
     }
 
     #[stable(feature = "rust1", since = "1.0.0")]
-    impl<'a,A,F:?Sized> FnOnce<A> for &'a F
-        where F : Fn<A>
+    impl<A, F: ?Sized> FnOnce<A> for &F
+    where
+        F: Fn<A>,
     {
         type Output = F::Output;
 
@@ -254,8 +266,9 @@ mod impls {
     }
 
     #[stable(feature = "rust1", since = "1.0.0")]
-    impl<'a,A,F:?Sized> FnMut<A> for &'a mut F
-        where F : FnMut<A>
+    impl<A, F: ?Sized> FnMut<A> for &mut F
+    where
+        F: FnMut<A>,
     {
         extern "rust-call" fn call_mut(&mut self, args: A) -> F::Output {
             (*self).call_mut(args)
@@ -263,8 +276,9 @@ mod impls {
     }
 
     #[stable(feature = "rust1", since = "1.0.0")]
-    impl<'a,A,F:?Sized> FnOnce<A> for &'a mut F
-        where F : FnMut<A>
+    impl<A, F: ?Sized> FnOnce<A> for &mut F
+    where
+        F: FnMut<A>,
     {
         type Output = F::Output;
         extern "rust-call" fn call_once(self, args: A) -> F::Output {

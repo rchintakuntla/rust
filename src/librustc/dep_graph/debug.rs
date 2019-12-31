@@ -1,13 +1,3 @@
-// Copyright 2012-2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Code for debugging the dep-graph.
 
 use super::dep_node::DepNode;
@@ -22,17 +12,15 @@ use std::error::Error;
 /// `z`.
 #[derive(Debug)]
 pub struct DepNodeFilter {
-    text: String
+    text: String,
 }
 
 impl DepNodeFilter {
     pub fn new(text: &str) -> Self {
-        DepNodeFilter {
-            text: text.trim().to_string()
-        }
+        DepNodeFilter { text: text.trim().to_string() }
     }
 
-    /// True if all nodes always pass the filter.
+    /// Returns `true` if all nodes always pass the filter.
     pub fn accepts_all(&self) -> bool {
         self.text.is_empty()
     }
@@ -40,9 +28,7 @@ impl DepNodeFilter {
     /// Tests whether `node` meets the filter, returning true if so.
     pub fn test(&self, node: &DepNode) -> bool {
         let debug_str = format!("{:?}", node);
-        self.text.split('&')
-                 .map(|s| s.trim())
-                 .all(|f| debug_str.contains(f))
+        self.text.split('&').map(|s| s.trim()).all(|f| debug_str.contains(f))
     }
 }
 
@@ -66,10 +52,7 @@ impl EdgeFilter {
         }
     }
 
-    pub fn test(&self,
-                source: &DepNode,
-                target: &DepNode)
-                -> bool {
+    pub fn test(&self, source: &DepNode, target: &DepNode) -> bool {
         self.source.test(source) && self.target.test(target)
     }
 }

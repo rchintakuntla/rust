@@ -1,25 +1,10 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-// compile-pass
-
-#[repr]
-//^ WARN `repr` attribute must have a hint
+#[repr] //~ ERROR malformed `repr` attribute
 struct _A {}
 
-#[repr = "B"]
-//^ WARN `repr` attribute isn't configurable with a literal
+#[repr = "B"] //~ ERROR malformed `repr` attribute
 struct _B {}
 
-#[repr = "C"]
-//^ WARN `repr` attribute isn't configurable with a literal
+#[repr = "C"] //~ ERROR malformed `repr` attribute
 struct _C {}
 
 #[repr(C)]

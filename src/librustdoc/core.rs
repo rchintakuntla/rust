@@ -1,113 +1,106 @@
-// Copyright 2012-2014 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
-use rustc_lint;
-use rustc_driver::{self, driver, target_features, abort_on_err};
-use rustc::session::{self, config};
-use rustc::hir::def_id::{DefId, DefIndex, DefIndexAddressSpace, CrateNum, LOCAL_CRATE};
-use rustc::hir::def::Def;
-use rustc::hir::{self, HirVec};
+use rustc::hir::def::Namespace::TypeNS;
+use rustc::hir::def_id::{CrateNum, DefId, DefIndex, LOCAL_CRATE};
+use rustc::hir::HirId;
+use rustc::lint;
 use rustc::middle::cstore::CrateStore;
 use rustc::middle::privacy::AccessLevels;
-use rustc::ty::{self, TyCtxt, AllArenas};
-use rustc::hir::map as hir_map;
-use rustc::lint::{self, LintPass};
 use rustc::session::config::ErrorOutputType;
+use rustc::session::DiagnosticOutput;
+use rustc::session::{self, config};
+use rustc::ty::{Ty, TyCtxt};
 use rustc::util::nodemap::{FxHashMap, FxHashSet};
+use rustc_driver::abort_on_err;
+use rustc_feature::UnstableFeatures;
+use rustc_interface::interface;
+use rustc_lint;
 use rustc_resolve as resolve;
-use rustc_metadata::creader::CrateLoader;
-use rustc_metadata::cstore::CStore;
-use rustc_target::spec::TargetTriple;
 
-use syntax::ast::{self, Ident};
-use syntax::codemap;
-use syntax::edition::Edition;
-use syntax::feature_gate::UnstableFeatures;
-use syntax::json::JsonEmitter;
-use syntax::ptr::P;
-use syntax::symbol::keywords;
-use syntax_pos::DUMMY_SP;
-use errors;
 use errors::emitter::{Emitter, EmitterWriter};
+use errors::json::JsonEmitter;
+use syntax::ast::CRATE_NODE_ID;
+use syntax::attr;
+use syntax::source_map;
+use syntax::symbol::sym;
+use syntax_pos::DUMMY_SP;
 
-use std::cell::{RefCell, Cell};
-use std::mem;
 use rustc_data_structures::sync::{self, Lrc};
+use std::cell::RefCell;
+use std::mem;
 use std::rc::Rc;
-use std::path::PathBuf;
 
-use visit_ast::RustdocVisitor;
-use clean;
-use clean::{get_path_for_type, Clean, MAX_DEF_ID, AttributesExt};
-use html::render::RenderInfo;
-use passes;
+use crate::clean;
+use crate::clean::{AttributesExt, MAX_DEF_ID};
+use crate::config::{Options as RustdocOptions, RenderOptions};
+use crate::html::render::RenderInfo;
 
-pub use rustc::session::config::{Input, Options, CodegenOptions};
-pub use rustc::session::search_paths::SearchPaths;
+use crate::passes;
+
+pub use rustc::session::config::{CodegenOptions, Input, Options};
+pub use rustc::session::search_paths::SearchPath;
 
 pub type ExternalPaths = FxHashMap<DefId, (Vec<String>, clean::TypeKind)>;
 
-pub struct DocContext<'a, 'tcx: 'a, 'rcx: 'a, 'cstore: 'rcx> {
-    pub tcx: TyCtxt<'a, 'tcx, 'tcx>,
-    pub resolver: &'a RefCell<resolve::Resolver<'rcx, 'cstore>>,
-    /// The stack of module NodeIds up till this point
-    pub crate_name: Option<String>,
-    pub cstore: Rc<CStore>,
-    pub populated_all_crate_impls: Cell<bool>,
-    // Note that external items for which `doc(hidden)` applies to are shown as
-    // non-reachable while local items aren't. This is because we're reusing
-    // the access levels from crateanalysis.
-    /// Later on moved into `clean::Crate`
-    pub access_levels: RefCell<AccessLevels<DefId>>,
+pub struct DocContext<'tcx> {
+    pub tcx: TyCtxt<'tcx>,
+    pub resolver: Rc<RefCell<interface::BoxedResolver>>,
     /// Later on moved into `html::render::CACHE_KEY`
     pub renderinfo: RefCell<RenderInfo>,
     /// Later on moved through `clean::Crate` into `html::render::CACHE_KEY`
-    pub external_traits: RefCell<FxHashMap<DefId, clean::Trait>>,
+    pub external_traits: Rc<RefCell<FxHashMap<DefId, clean::Trait>>>,
     /// Used while populating `external_traits` to ensure we don't process the same trait twice at
     /// the same time.
-    pub active_extern_traits: RefCell<Vec<DefId>>,
+    pub active_extern_traits: RefCell<FxHashSet<DefId>>,
     // The current set of type and lifetime substitutions,
     // for expanding type aliases at the HIR level:
-
-    /// Table type parameter definition -> substituted type
-    pub ty_substs: RefCell<FxHashMap<Def, clean::Type>>,
-    /// Table node id of lifetime parameter definition -> substituted lifetime
+    /// Table `DefId` of type parameter -> substituted type
+    pub ty_substs: RefCell<FxHashMap<DefId, clean::Type>>,
+    /// Table `DefId` of lifetime parameter -> substituted lifetime
     pub lt_substs: RefCell<FxHashMap<DefId, clean::Lifetime>>,
-    /// Table DefId of `impl Trait` in argument position -> bounds
-    pub impl_trait_bounds: RefCell<FxHashMap<DefId, Vec<clean::GenericBound>>>,
-    pub send_trait: Option<DefId>,
+    /// Table `DefId` of const parameter -> substituted const
+    pub ct_substs: RefCell<FxHashMap<DefId, clean::Constant>>,
+    /// Table synthetic type parameter for `impl Trait` in argument position -> bounds
+    pub impl_trait_bounds: RefCell<FxHashMap<ImplTraitParam, Vec<clean::GenericBound>>>,
     pub fake_def_ids: RefCell<FxHashMap<CrateNum, DefId>>,
     pub all_fake_def_ids: RefCell<FxHashSet<DefId>>,
-    /// Maps (type_id, trait_id) -> auto trait impl
-    pub generated_synthetics: RefCell<FxHashSet<(DefId, DefId)>>,
-    pub all_traits: Vec<DefId>,
+    /// Auto-trait or blanket impls processed so far, as `(self_ty, trait_def_id)`.
+    // FIXME(eddyb) make this a `ty::TraitRef<'tcx>` set.
+    pub generated_synthetics: RefCell<FxHashSet<(Ty<'tcx>, DefId)>>,
+    pub auto_traits: Vec<DefId>,
 }
 
-impl<'a, 'tcx, 'rcx, 'cstore> DocContext<'a, 'tcx, 'rcx, 'cstore> {
+impl<'tcx> DocContext<'tcx> {
     pub fn sess(&self) -> &session::Session {
         &self.tcx.sess
     }
 
+    pub fn enter_resolver<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&mut resolve::Resolver<'_>) -> R,
+    {
+        self.resolver.borrow_mut().access(f)
+    }
+
     /// Call the closure with the given parameters set as
     /// the substitutions for a type alias' RHS.
-    pub fn enter_alias<F, R>(&self,
-                             ty_substs: FxHashMap<Def, clean::Type>,
-                             lt_substs: FxHashMap<DefId, clean::Lifetime>,
-                             f: F) -> R
-    where F: FnOnce() -> R {
-        let (old_tys, old_lts) =
-            (mem::replace(&mut *self.ty_substs.borrow_mut(), ty_substs),
-             mem::replace(&mut *self.lt_substs.borrow_mut(), lt_substs));
+    pub fn enter_alias<F, R>(
+        &self,
+        ty_substs: FxHashMap<DefId, clean::Type>,
+        lt_substs: FxHashMap<DefId, clean::Lifetime>,
+        ct_substs: FxHashMap<DefId, clean::Constant>,
+        f: F,
+    ) -> R
+    where
+        F: FnOnce() -> R,
+    {
+        let (old_tys, old_lts, old_cts) = (
+            mem::replace(&mut *self.ty_substs.borrow_mut(), ty_substs),
+            mem::replace(&mut *self.lt_substs.borrow_mut(), lt_substs),
+            mem::replace(&mut *self.ct_substs.borrow_mut(), ct_substs),
+        );
         let r = f();
         *self.ty_substs.borrow_mut() = old_tys;
         *self.lt_substs.borrow_mut() = old_lts;
+        *self.ct_substs.borrow_mut() = old_cts;
         r
     }
 
@@ -116,27 +109,18 @@ impl<'a, 'tcx, 'rcx, 'cstore> DocContext<'a, 'tcx, 'rcx, 'cstore> {
     // registered after the AST is constructed would require storing the defid mapping in a
     // RefCell, decreasing the performance for normal compilation for very little gain.
     //
-    // Instead, we construct 'fake' def ids, which start immediately after the last DefId in
-    // DefIndexAddressSpace::Low. In the Debug impl for clean::Item, we explicitly check for fake
+    // Instead, we construct 'fake' def ids, which start immediately after the last DefId.
+    // In the Debug impl for clean::Item, we explicitly check for fake
     // def ids, as we'll end up with a panic if we use the DefId Debug impl for fake DefIds
     pub fn next_def_id(&self, crate_num: CrateNum) -> DefId {
         let start_def_id = {
             let next_id = if crate_num == LOCAL_CRATE {
-                self.tcx
-                    .hir
-                    .definitions()
-                    .def_path_table()
-                    .next_id(DefIndexAddressSpace::Low)
+                self.tcx.hir().definitions().def_path_table().next_id()
             } else {
-                self.cstore
-                    .def_path_table(crate_num)
-                    .next_id(DefIndexAddressSpace::Low)
+                self.enter_resolver(|r| r.cstore().def_path_table(crate_num).next_id())
             };
 
-            DefId {
-                krate: crate_num,
-                index: next_id,
-            }
+            DefId { krate: crate_num, index: next_id }
         };
 
         let mut fake_ids = self.fake_def_ids.borrow_mut();
@@ -144,19 +128,11 @@ impl<'a, 'tcx, 'rcx, 'cstore> DocContext<'a, 'tcx, 'rcx, 'cstore> {
         let def_id = fake_ids.entry(crate_num).or_insert(start_def_id).clone();
         fake_ids.insert(
             crate_num,
-            DefId {
-                krate: crate_num,
-                index: DefIndex::from_array_index(
-                    def_id.index.as_array_index() + 1,
-                    def_id.index.address_space(),
-                ),
-            },
+            DefId { krate: crate_num, index: DefIndex::from(def_id.index.index() + 1) },
         );
 
         MAX_DEF_ID.with(|m| {
-            m.borrow_mut()
-                .entry(def_id.krate.clone())
-                .or_insert(start_def_id);
+            m.borrow_mut().entry(def_id.krate.clone()).or_insert(start_def_id);
         });
 
         self.all_fake_def_ids.borrow_mut().insert(def_id);
@@ -164,142 +140,73 @@ impl<'a, 'tcx, 'rcx, 'cstore> DocContext<'a, 'tcx, 'rcx, 'cstore> {
         def_id.clone()
     }
 
-    pub fn get_real_ty<F>(&self,
-                          def_id: DefId,
-                          def_ctor: &F,
-                          real_name: &Option<Ident>,
-                          generics: &ty::Generics,
-    ) -> hir::Ty
-    where F: Fn(DefId) -> Def {
-        let path = get_path_for_type(self.tcx, def_id, def_ctor);
-        let mut segments = path.segments.into_vec();
-        let last = segments.pop().expect("segments were empty");
-
-        segments.push(hir::PathSegment::new(
-            real_name.unwrap_or(last.ident),
-            self.generics_to_path_params(generics.clone()),
-            false,
-        ));
-
-        let new_path = hir::Path {
-            span: path.span,
-            def: path.def,
-            segments: HirVec::from_vec(segments),
-        };
-
-        hir::Ty {
-            id: ast::DUMMY_NODE_ID,
-            node: hir::TyKind::Path(hir::QPath::Resolved(None, P(new_path))),
-            span: DUMMY_SP,
-            hir_id: hir::DUMMY_HIR_ID,
+    /// Like the function of the same name on the HIR map, but skips calling it on fake DefIds.
+    /// (This avoids a slice-index-out-of-bounds panic.)
+    pub fn as_local_hir_id(&self, def_id: DefId) -> Option<HirId> {
+        if self.all_fake_def_ids.borrow().contains(&def_id) {
+            None
+        } else {
+            self.tcx.hir().as_local_hir_id(def_id)
         }
     }
 
-    pub fn generics_to_path_params(&self, generics: ty::Generics) -> hir::GenericArgs {
-        let mut args = vec![];
-
-        for param in generics.params.iter() {
-            match param.kind {
-                ty::GenericParamDefKind::Lifetime => {
-                    let name = if param.name == "" {
-                        hir::ParamName::Plain(keywords::StaticLifetime.ident())
-                    } else {
-                        hir::ParamName::Plain(ast::Ident::from_interned_str(param.name))
-                    };
-
-                    args.push(hir::GenericArg::Lifetime(hir::Lifetime {
-                        id: ast::DUMMY_NODE_ID,
-                        span: DUMMY_SP,
-                        name: hir::LifetimeName::Param(name),
-                    }));
-                }
-                ty::GenericParamDefKind::Type {..} => {
-                    args.push(hir::GenericArg::Type(self.ty_param_to_ty(param.clone())));
-                }
-            }
-        }
-
-        hir::GenericArgs {
-            args: HirVec::from_vec(args),
-            bindings: HirVec::new(),
-            parenthesized: false,
-        }
+    pub fn stability(&self, id: HirId) -> Option<attr::Stability> {
+        self.tcx
+            .hir()
+            .opt_local_def_id(id)
+            .and_then(|def_id| self.tcx.lookup_stability(def_id))
+            .cloned()
     }
 
-    pub fn ty_param_to_ty(&self, param: ty::GenericParamDef) -> hir::Ty {
-        debug!("ty_param_to_ty({:?}) {:?}", param, param.def_id);
-        hir::Ty {
-            id: ast::DUMMY_NODE_ID,
-            node: hir::TyKind::Path(hir::QPath::Resolved(
-                None,
-                P(hir::Path {
-                    span: DUMMY_SP,
-                    def: Def::TyParam(param.def_id),
-                    segments: HirVec::from_vec(vec![
-                        hir::PathSegment::from_ident(Ident::from_interned_str(param.name))
-                    ]),
-                }),
-            )),
-            span: DUMMY_SP,
-            hir_id: hir::DUMMY_HIR_ID,
-        }
-    }
-}
-
-pub trait DocAccessLevels {
-    fn is_doc_reachable(&self, did: DefId) -> bool;
-}
-
-impl DocAccessLevels for AccessLevels<DefId> {
-    fn is_doc_reachable(&self, did: DefId) -> bool {
-        self.is_public(did)
+    pub fn deprecation(&self, id: HirId) -> Option<attr::Deprecation> {
+        self.tcx.hir().opt_local_def_id(id).and_then(|def_id| self.tcx.lookup_deprecation(def_id))
     }
 }
 
 /// Creates a new diagnostic `Handler` that can be used to emit warnings and errors.
 ///
-/// If the given `error_format` is `ErrorOutputType::Json` and no `CodeMap` is given, a new one
+/// If the given `error_format` is `ErrorOutputType::Json` and no `SourceMap` is given, a new one
 /// will be created for the handler.
-pub fn new_handler(error_format: ErrorOutputType, codemap: Option<Lrc<codemap::CodeMap>>)
-    -> errors::Handler
-{
+pub fn new_handler(
+    error_format: ErrorOutputType,
+    source_map: Option<Lrc<source_map::SourceMap>>,
+    treat_err_as_bug: Option<usize>,
+    ui_testing: bool,
+) -> errors::Handler {
     // rustdoc doesn't override (or allow to override) anything from this that is relevant here, so
     // stick to the defaults
     let sessopts = Options::default();
     let emitter: Box<dyn Emitter + sync::Send> = match error_format {
-        ErrorOutputType::HumanReadable(color_config) => Box::new(
-            EmitterWriter::stderr(
-                color_config,
-                codemap.map(|cm| cm as _),
-                false,
-                sessopts.debugging_opts.teach,
-            ).ui_testing(sessopts.debugging_opts.ui_testing)
-        ),
-        ErrorOutputType::Json(pretty) => {
-            let codemap = codemap.unwrap_or_else(
-                || Lrc::new(codemap::CodeMap::new(sessopts.file_path_mapping())));
+        ErrorOutputType::HumanReadable(kind) => {
+            let (short, color_config) = kind.unzip();
             Box::new(
-                JsonEmitter::stderr(
-                    None,
-                    codemap,
-                    pretty,
-                ).ui_testing(sessopts.debugging_opts.ui_testing)
+                EmitterWriter::stderr(
+                    color_config,
+                    source_map.map(|cm| cm as _),
+                    short,
+                    sessopts.debugging_opts.teach,
+                    sessopts.debugging_opts.terminal_width,
+                    false,
+                )
+                .ui_testing(ui_testing),
             )
-        },
-        ErrorOutputType::Short(color_config) => Box::new(
-            EmitterWriter::stderr(
-                color_config,
-                codemap.map(|cm| cm as _),
-                true,
-                false)
-        ),
+        }
+        ErrorOutputType::Json { pretty, json_rendered } => {
+            let source_map = source_map.unwrap_or_else(|| {
+                Lrc::new(source_map::SourceMap::new(sessopts.file_path_mapping()))
+            });
+            Box::new(
+                JsonEmitter::stderr(None, source_map, pretty, json_rendered, false)
+                    .ui_testing(ui_testing),
+            )
+        }
     };
 
     errors::Handler::with_emitter_and_flags(
         emitter,
         errors::HandlerFlags {
             can_emit_warnings: true,
-            treat_err_as_bug: false,
+            treat_err_as_bug,
             report_delayed_bugs: false,
             external_macro_backtrace: false,
             ..Default::default()
@@ -307,298 +214,310 @@ pub fn new_handler(error_format: ErrorOutputType, codemap: Option<Lrc<codemap::C
     )
 }
 
-pub fn run_core(search_paths: SearchPaths,
-                cfgs: Vec<String>,
-                externs: config::Externs,
-                input: Input,
-                triple: Option<TargetTriple>,
-                maybe_sysroot: Option<PathBuf>,
-                allow_warnings: bool,
-                crate_name: Option<String>,
-                force_unstable_if_unmarked: bool,
-                edition: Edition,
-                cg: CodegenOptions,
-                error_format: ErrorOutputType,
-                cmd_lints: Vec<(String, lint::Level)>,
-                lint_cap: Option<lint::Level>,
-                describe_lints: bool,
-                mut manual_passes: Vec<String>,
-                mut default_passes: passes::DefaultPassOption)
-    -> (clean::Crate, RenderInfo, Vec<String>)
-{
+pub fn run_core(options: RustdocOptions) -> (clean::Crate, RenderInfo, RenderOptions) {
     // Parse, resolve, and typecheck the given crate.
 
-    let cpath = match input {
-        Input::File(ref p) => Some(p.clone()),
-        _ => None
-    };
+    let RustdocOptions {
+        input,
+        crate_name,
+        proc_macro_crate,
+        error_format,
+        libs,
+        externs,
+        mut cfgs,
+        codegen_options,
+        debugging_options,
+        target,
+        edition,
+        maybe_sysroot,
+        lint_opts,
+        describe_lints,
+        lint_cap,
+        mut default_passes,
+        mut manual_passes,
+        display_warnings,
+        render_options,
+        ..
+    } = options;
+
+    let extern_names: Vec<String> = externs
+        .iter()
+        .filter(|(_, entry)| entry.add_prelude)
+        .map(|(name, _)| name)
+        .cloned()
+        .collect();
+
+    // Add the doc cfg into the doc build.
+    cfgs.push("doc".to_string());
+
+    let cpath = Some(input.clone());
+    let input = Input::File(input);
 
     let intra_link_resolution_failure_name = lint::builtin::INTRA_DOC_LINK_RESOLUTION_FAILURE.name;
     let warnings_lint_name = lint::builtin::WARNINGS.name;
     let missing_docs = rustc_lint::builtin::MISSING_DOCS.name;
+    let missing_doc_example = rustc_lint::builtin::MISSING_DOC_CODE_EXAMPLES.name;
+    let private_doc_tests = rustc_lint::builtin::PRIVATE_DOC_TESTS.name;
 
     // In addition to those specific lints, we also need to whitelist those given through
     // command line, otherwise they'll get ignored and we don't want that.
-    let mut whitelisted_lints = vec![warnings_lint_name.to_owned(),
-                                     intra_link_resolution_failure_name.to_owned(),
-                                     missing_docs.to_owned()];
+    let mut whitelisted_lints = vec![
+        warnings_lint_name.to_owned(),
+        intra_link_resolution_failure_name.to_owned(),
+        missing_docs.to_owned(),
+        missing_doc_example.to_owned(),
+        private_doc_tests.to_owned(),
+    ];
 
-    whitelisted_lints.extend(cmd_lints.iter().map(|(lint, _)| lint).cloned());
+    whitelisted_lints.extend(lint_opts.iter().map(|(lint, _)| lint).cloned());
 
-    let lints = lint::builtin::HardwiredLints.get_lints()
-                    .into_iter()
-                    .chain(rustc_lint::SoftLints.get_lints().into_iter())
-                    .filter_map(|lint| {
-                        if lint.name == warnings_lint_name ||
-                           lint.name == intra_link_resolution_failure_name {
-                            None
-                        } else {
-                            Some((lint.name_lower(), lint::Allow))
-                        }
-                    })
-                    .chain(cmd_lints.into_iter())
-                    .collect::<Vec<_>>();
+    let lints = || {
+        lint::builtin::HardwiredLints::get_lints()
+            .into_iter()
+            .chain(rustc_lint::SoftLints::get_lints().into_iter())
+    };
 
-    let host_triple = TargetTriple::from_triple(config::host_triple());
+    let lint_opts = lints()
+        .filter_map(|lint| {
+            if lint.name == warnings_lint_name || lint.name == intra_link_resolution_failure_name {
+                None
+            } else {
+                Some((lint.name_lower(), lint::Allow))
+            }
+        })
+        .chain(lint_opts.into_iter())
+        .collect::<Vec<_>>();
+
+    let lint_caps = lints()
+        .filter_map(|lint| {
+            // We don't want to whitelist *all* lints so let's
+            // ignore those ones.
+            if whitelisted_lints.iter().any(|l| &lint.name == l) {
+                None
+            } else {
+                Some((lint::LintId::of(lint), lint::Allow))
+            }
+        })
+        .collect();
+
+    let crate_types = if proc_macro_crate {
+        vec![config::CrateType::ProcMacro]
+    } else {
+        vec![config::CrateType::Rlib]
+    };
     // plays with error output here!
     let sessopts = config::Options {
         maybe_sysroot,
-        search_paths,
-        crate_types: vec![config::CrateType::Rlib],
-        lint_opts: if !allow_warnings {
-            lints
-        } else {
-            vec![]
-        },
+        search_paths: libs,
+        crate_types,
+        lint_opts: if !display_warnings { lint_opts } else { vec![] },
         lint_cap: Some(lint_cap.unwrap_or_else(|| lint::Forbid)),
-        cg,
+        cg: codegen_options,
         externs,
-        target_triple: triple.unwrap_or(host_triple),
+        target_triple: target,
         // Ensure that rustdoc works even if rustc is feature-staged
         unstable_features: UnstableFeatures::Allow,
         actually_rustdoc: true,
-        debugging_opts: config::DebuggingOptions {
-            force_unstable_if_unmarked,
-            ..config::basic_debugging_options()
-        },
+        debugging_opts: debugging_options,
         error_format,
         edition,
         describe_lints,
         ..Options::default()
     };
-    driver::spawn_thread_pool(sessopts, move |sessopts| {
-        let codemap = Lrc::new(codemap::CodeMap::new(sessopts.file_path_mapping()));
-        let diagnostic_handler = new_handler(error_format, Some(codemap.clone()));
 
-        let mut sess = session::build_session_(
-            sessopts, cpath, diagnostic_handler, codemap,
-        );
+    let config = interface::Config {
+        opts: sessopts,
+        crate_cfg: interface::parse_cfgspecs(cfgs),
+        input,
+        input_path: cpath,
+        output_file: None,
+        output_dir: None,
+        file_loader: None,
+        diagnostic_output: DiagnosticOutput::Default,
+        stderr: None,
+        crate_name,
+        lint_caps,
+        register_lints: None,
+        override_queries: None,
+        registry: rustc_driver::diagnostics_registry(),
+    };
 
-        lint::builtin::HardwiredLints.get_lints()
-                                     .into_iter()
-                                     .chain(rustc_lint::SoftLints.get_lints().into_iter())
-                                     .filter_map(|lint| {
-                                         // We don't want to whitelist *all* lints so let's
-                                         // ignore those ones.
-                                         if whitelisted_lints.iter().any(|l| &lint.name == l) {
-                                             None
-                                         } else {
-                                             Some(lint)
-                                         }
-                                     })
-                                     .for_each(|l| {
-                                         sess.driver_lint_caps.insert(lint::LintId::of(l),
-                                                                      lint::Allow);
-                                     });
+    interface::run_compiler_in_existing_thread_pool(config, |compiler| {
+        compiler.enter(|queries| {
+            let sess = compiler.session();
 
-        let codegen_backend = rustc_driver::get_codegen_backend(&sess);
-        let cstore = Rc::new(CStore::new(codegen_backend.metadata_loader()));
-        rustc_lint::register_builtins(&mut sess.lint_store.borrow_mut(), Some(&sess));
+            // We need to hold on to the complete resolver, so we cause everything to be
+            // cloned for the analysis passes to use. Suboptimal, but necessary in the
+            // current architecture.
+            let resolver = {
+                let parts = abort_on_err(queries.expansion(), sess).peek();
+                let resolver = parts.1.borrow();
 
-        let mut cfg = config::build_configuration(&sess, config::parse_cfgspecs(cfgs));
-        target_features::add_configuration(&mut cfg, &sess, &*codegen_backend);
-        sess.parse_sess.config = cfg;
+                // Before we actually clone it, let's force all the extern'd crates to
+                // actually be loaded, just in case they're only referred to inside
+                // intra-doc-links
+                resolver.borrow_mut().access(|resolver| {
+                    for extern_name in &extern_names {
+                        resolver
+                            .resolve_str_path_error(DUMMY_SP, extern_name, TypeNS, CRATE_NODE_ID)
+                            .unwrap_or_else(|()| {
+                                panic!("Unable to resolve external crate {}", extern_name)
+                            });
+                    }
+                });
 
-        let control = &driver::CompileController::basic();
+                // Now we're good to clone the resolver because everything should be loaded
+                resolver.clone()
+            };
 
-        let krate = panictry!(driver::phase_1_parse_input(control, &sess, &input));
-
-        let name = match crate_name {
-            Some(ref crate_name) => crate_name.clone(),
-            None => ::rustc_codegen_utils::link::find_crate_name(Some(&sess), &krate.attrs, &input),
-        };
-
-        let mut crate_loader = CrateLoader::new(&sess, &cstore, &name);
-
-        let resolver_arenas = resolve::Resolver::arenas();
-        let result = driver::phase_2_configure_and_expand_inner(&sess,
-                                                        &cstore,
-                                                        krate,
-                                                        None,
-                                                        &name,
-                                                        None,
-                                                        resolve::MakeGlobMap::No,
-                                                        &resolver_arenas,
-                                                        &mut crate_loader,
-                                                        |_| Ok(()));
-        let driver::InnerExpansionResult {
-            mut hir_forest,
-            mut resolver,
-            ..
-        } = abort_on_err(result, &sess);
-
-        resolver.ignore_extern_prelude_feature = true;
-
-        // We need to hold on to the complete resolver, so we clone everything
-        // for the analysis passes to use. Suboptimal, but necessary in the
-        // current architecture.
-        let defs = resolver.definitions.clone();
-        let resolutions = ty::Resolutions {
-            freevars: resolver.freevars.clone(),
-            export_map: resolver.export_map.clone(),
-            trait_map: resolver.trait_map.clone(),
-            maybe_unused_trait_imports: resolver.maybe_unused_trait_imports.clone(),
-            maybe_unused_extern_crates: resolver.maybe_unused_extern_crates.clone(),
-        };
-        let analysis = ty::CrateAnalysis {
-            access_levels: Lrc::new(AccessLevels::default()),
-            name: name.to_string(),
-            glob_map: if resolver.make_glob_map { Some(resolver.glob_map.clone()) } else { None },
-        };
-
-        let arenas = AllArenas::new();
-        let hir_map = hir_map::map_crate(&sess, &*cstore, &mut hir_forest, &defs);
-        let output_filenames = driver::build_output_filenames(&input,
-                                                            &None,
-                                                            &None,
-                                                            &[],
-                                                            &sess);
-
-        let resolver = RefCell::new(resolver);
-        abort_on_err(driver::phase_3_run_analysis_passes(&*codegen_backend,
-                                                        control,
-                                                        &sess,
-                                                        &*cstore,
-                                                        hir_map,
-                                                        analysis,
-                                                        resolutions,
-                                                        &arenas,
-                                                        &name,
-                                                        &output_filenames,
-                                                        |tcx, analysis, _, result| {
-            if result.is_err() {
+            if sess.has_errors() {
                 sess.fatal("Compilation failed, aborting rustdoc");
             }
 
-            let ty::CrateAnalysis { access_levels, .. } = analysis;
+            let mut global_ctxt = abort_on_err(queries.global_ctxt(), sess).take();
 
-            // Convert from a NodeId set to a DefId set since we don't always have easy access
-            // to the map from defid -> nodeid
-            let access_levels = AccessLevels {
-                map: access_levels.map.iter()
-                                    .map(|(&k, &v)| (tcx.hir.local_def_id(k), v))
-                                    .collect()
-            };
+            global_ctxt.enter(|tcx| {
+                tcx.analysis(LOCAL_CRATE).ok();
 
-            let send_trait = if crate_name == Some("core".to_string()) {
-                clean::path_to_def_local(&tcx, &["marker", "Send"])
-            } else {
-                clean::path_to_def(&tcx, &["core", "marker", "Send"])
-            };
+                // Abort if there were any errors so far
+                sess.abort_if_errors();
 
-            let ctxt = DocContext {
-                tcx,
-                resolver: &resolver,
-                crate_name,
-                cstore: cstore.clone(),
-                populated_all_crate_impls: Cell::new(false),
-                access_levels: RefCell::new(access_levels),
-                external_traits: Default::default(),
-                active_extern_traits: Default::default(),
-                renderinfo: Default::default(),
-                ty_substs: Default::default(),
-                lt_substs: Default::default(),
-                impl_trait_bounds: Default::default(),
-                send_trait: send_trait,
-                fake_def_ids: RefCell::new(FxHashMap()),
-                all_fake_def_ids: RefCell::new(FxHashSet()),
-                generated_synthetics: RefCell::new(FxHashSet()),
-                all_traits: tcx.all_traits(LOCAL_CRATE).to_vec(),
-            };
-            debug!("crate: {:?}", tcx.hir.krate());
+                let access_levels = tcx.privacy_access_levels(LOCAL_CRATE);
+                // Convert from a HirId set to a DefId set since we don't always have easy access
+                // to the map from defid -> hirid
+                let access_levels = AccessLevels {
+                    map: access_levels
+                        .map
+                        .iter()
+                        .map(|(&k, &v)| (tcx.hir().local_def_id(k), v))
+                        .collect(),
+                };
 
-            let mut krate = {
-                let mut v = RustdocVisitor::new(&ctxt);
-                v.visit(tcx.hir.krate());
-                v.clean(&ctxt)
-            };
+                let mut renderinfo = RenderInfo::default();
+                renderinfo.access_levels = access_levels;
 
-            fn report_deprecated_attr(name: &str, diag: &errors::Handler) {
-                let mut msg = diag.struct_warn(&format!("the `#![doc({})]` attribute is \
-                                                         considered deprecated", name));
-                msg.warn("please see https://github.com/rust-lang/rust/issues/44136");
+                let mut ctxt = DocContext {
+                    tcx,
+                    resolver,
+                    external_traits: Default::default(),
+                    active_extern_traits: Default::default(),
+                    renderinfo: RefCell::new(renderinfo),
+                    ty_substs: Default::default(),
+                    lt_substs: Default::default(),
+                    ct_substs: Default::default(),
+                    impl_trait_bounds: Default::default(),
+                    fake_def_ids: Default::default(),
+                    all_fake_def_ids: Default::default(),
+                    generated_synthetics: Default::default(),
+                    auto_traits: tcx
+                        .all_traits(LOCAL_CRATE)
+                        .iter()
+                        .cloned()
+                        .filter(|trait_def_id| tcx.trait_is_auto(*trait_def_id))
+                        .collect(),
+                };
+                debug!("crate: {:?}", tcx.hir().krate());
 
-                if name == "no_default_passes" {
-                    msg.help("you may want to use `#![doc(document_private_items)]`");
+                let mut krate = clean::krate(&mut ctxt);
+
+                fn report_deprecated_attr(name: &str, diag: &errors::Handler) {
+                    let mut msg = diag.struct_warn(&format!(
+                        "the `#![doc({})]` attribute is \
+                                                         considered deprecated",
+                        name
+                    ));
+                    msg.warn("please see https://github.com/rust-lang/rust/issues/44136");
+
+                    if name == "no_default_passes" {
+                        msg.help("you may want to use `#![doc(document_private_items)]`");
+                    }
+
+                    msg.emit();
                 }
 
-                msg.emit();
-            }
+                // Process all of the crate attributes, extracting plugin metadata along
+                // with the passes which we are supposed to run.
+                for attr in krate.module.as_ref().unwrap().attrs.lists(sym::doc) {
+                    let diag = ctxt.sess().diagnostic();
 
-            // Process all of the crate attributes, extracting plugin metadata along
-            // with the passes which we are supposed to run.
-            for attr in krate.module.as_ref().unwrap().attrs.lists("doc") {
-                let diag = ctxt.sess().diagnostic();
-
-                let name = attr.name().map(|s| s.as_str());
-                let name = name.as_ref().map(|s| &s[..]);
-                if attr.is_word() {
-                    if name == Some("no_default_passes") {
-                        report_deprecated_attr("no_default_passes", diag);
-                        if default_passes == passes::DefaultPassOption::Default {
-                            default_passes = passes::DefaultPassOption::None;
+                    let name = attr.name_or_empty();
+                    if attr.is_word() {
+                        if name == sym::no_default_passes {
+                            report_deprecated_attr("no_default_passes", diag);
+                            if default_passes == passes::DefaultPassOption::Default {
+                                default_passes = passes::DefaultPassOption::None;
+                            }
+                        }
+                    } else if let Some(value) = attr.value_str() {
+                        let sink = match name {
+                            sym::passes => {
+                                report_deprecated_attr("passes = \"...\"", diag);
+                                &mut manual_passes
+                            }
+                            sym::plugins => {
+                                report_deprecated_attr("plugins = \"...\"", diag);
+                                eprintln!(
+                                    "WARNING: `#![doc(plugins = \"...\")]` \
+                                      no longer functions; see CVE-2018-1000622"
+                                );
+                                continue;
+                            }
+                            _ => continue,
+                        };
+                        for name in value.as_str().split_whitespace() {
+                            sink.push(name.to_string());
                         }
                     }
-                } else if let Some(value) = attr.value_str() {
-                    let sink = match name {
-                        Some("passes") => {
-                            report_deprecated_attr("passes = \"...\"", diag);
-                            &mut manual_passes
-                        },
-                        Some("plugins") => {
-                            report_deprecated_attr("plugins = \"...\"", diag);
-                            eprintln!("WARNING: #![doc(plugins = \"...\")] no longer functions; \
-                                      see CVE-2018-1000622");
-                            continue
-                        },
-                        _ => continue,
-                    };
-                    for p in value.as_str().split_whitespace() {
-                        sink.push(p.to_string());
+
+                    if attr.is_word() && name == sym::document_private_items {
+                        if default_passes == passes::DefaultPassOption::Default {
+                            default_passes = passes::DefaultPassOption::Private;
+                        }
                     }
                 }
 
-                if attr.is_word() && name == Some("document_private_items") {
-                    if default_passes == passes::DefaultPassOption::Default {
-                        default_passes = passes::DefaultPassOption::Private;
-                    }
+                let passes = passes::defaults(default_passes).iter().chain(
+                    manual_passes.into_iter().flat_map(|name| {
+                        if let Some(pass) = passes::find_pass(&name) {
+                            Some(pass)
+                        } else {
+                            error!("unknown pass {}, skipping", name);
+                            None
+                        }
+                    }),
+                );
+
+                info!("Executing passes");
+
+                for pass in passes {
+                    debug!("running pass {}", pass.name);
+                    krate = (pass.pass)(krate, &ctxt);
                 }
-            }
 
-            let mut passes: Vec<String> =
-                passes::defaults(default_passes).iter().map(|p| p.to_string()).collect();
-            passes.extend(manual_passes);
+                ctxt.sess().abort_if_errors();
 
-            for pass in &passes {
-                // the "unknown pass" error will be reported when late passes are run
-                if let Some(pass) = passes::find_pass(pass).and_then(|p| p.early_fn()) {
-                    krate = pass(krate, &ctxt);
-                }
-            }
-
-            ctxt.sess().abort_if_errors();
-
-            (krate, ctxt.renderinfo.into_inner(), passes)
-        }), &sess)
+                (krate, ctxt.renderinfo.into_inner(), render_options)
+            })
+        })
     })
+}
+
+/// `DefId` or parameter index (`ty::ParamTy.index`) of a synthetic type parameter
+/// for `impl Trait` in argument position.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum ImplTraitParam {
+    DefId(DefId),
+    ParamIndex(u32),
+}
+
+impl From<DefId> for ImplTraitParam {
+    fn from(did: DefId) -> Self {
+        ImplTraitParam::DefId(did)
+    }
+}
+
+impl From<u32> for ImplTraitParam {
+    fn from(idx: u32) -> Self {
+        ImplTraitParam::ParamIndex(idx)
+    }
 }

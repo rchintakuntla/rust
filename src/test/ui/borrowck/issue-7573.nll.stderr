@@ -1,15 +1,9 @@
-warning: not reporting region error due to nll
-  --> $DIR/issue-7573.rs:27:31
-   |
-LL |     let mut lines_to_use: Vec<&CrateId> = Vec::new();
-   |                               ^
-
-error: borrowed data escapes outside of closure
-  --> $DIR/issue-7573.rs:32:9
+error[E0521]: borrowed data escapes outside of closure
+  --> $DIR/issue-7573.rs:21:9
    |
 LL |     let mut lines_to_use: Vec<&CrateId> = Vec::new();
    |         ---------------- `lines_to_use` is declared here, outside of the closure body
-LL |         //~^ NOTE cannot infer an appropriate lifetime
+LL |
 LL |     let push_id = |installed_id: &CrateId| {
    |                    ------------ `installed_id` is a reference that is only valid in the closure body
 ...

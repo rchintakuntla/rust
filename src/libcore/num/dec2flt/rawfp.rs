@@ -1,13 +1,3 @@
-// Copyright 2015 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 //! Bit fiddling on positive IEEE 754 floats. Negative numbers aren't and needn't be handled.
 //! Normal floating point numbers have a canonical representation as (frac, exp) such that the
 //! value is 2<sup>exp</sup> * (1 + sum(frac[N-i] / 2<sup>i</sup>)) where N is the number of bits.
@@ -27,15 +17,15 @@
 //! Many functions in this module only handle normal numbers. The dec2flt routines conservatively
 //! take the universally-correct slow path (Algorithm M) for very small and very large numbers.
 //! That algorithm needs only next_float() which does handle subnormals and zeros.
-use cmp::Ordering::{Less, Equal, Greater};
-use convert::{TryFrom, TryInto};
-use ops::{Add, Mul, Div, Neg};
-use fmt::{Debug, LowerExp};
-use num::diy_float::Fp;
-use num::FpCategory::{Infinite, Zero, Subnormal, Normal, Nan};
-use num::FpCategory;
-use num::dec2flt::num::{self, Big};
-use num::dec2flt::table;
+use crate::cmp::Ordering::{Equal, Greater, Less};
+use crate::convert::{TryFrom, TryInto};
+use crate::fmt::{Debug, LowerExp};
+use crate::num::dec2flt::num::{self, Big};
+use crate::num::dec2flt::table;
+use crate::num::diy_float::Fp;
+use crate::num::FpCategory;
+use crate::num::FpCategory::{Infinite, Nan, Normal, Subnormal, Zero};
+use crate::ops::{Add, Div, Mul, Neg};
 
 #[derive(Copy, Clone, Debug)]
 pub struct Unpacked {
@@ -54,13 +44,8 @@ impl Unpacked {
 /// See the parent module's doc comment for why this is necessary.
 ///
 /// Should **never ever** be implemented for other types or be used outside the dec2flt module.
-pub trait RawFloat
-    : Copy
-    + Debug
-    + LowerExp
-    + Mul<Output=Self>
-    + Div<Output=Self>
-    + Neg<Output=Self>
+pub trait RawFloat:
+    Copy + Debug + LowerExp + Mul<Output = Self> + Div<Output = Self> + Neg<Output = Self>
 {
     const INFINITY: Self;
     const NAN: Self;
@@ -69,10 +54,10 @@ pub trait RawFloat
     /// Type used by `to_bits` and `from_bits`.
     type Bits: Add<Output = Self::Bits> + From<u8> + TryFrom<u64>;
 
-    /// Raw transmutation to integer.
+    /// Performs a raw transmutation to an integer.
     fn to_bits(self) -> Self::Bits;
 
-    /// Raw transmutation from integer.
+    /// Performs a raw transmutation from an integer.
     fn from_bits(v: Self::Bits) -> Self;
 
     /// Returns the category that this number falls into.
@@ -81,14 +66,14 @@ pub trait RawFloat
     /// Returns the mantissa, exponent and sign as integers.
     fn integer_decode(self) -> (u64, i16, i8);
 
-    /// Decode the float.
+    /// Decodes the float.
     fn unpack(self) -> Unpacked;
 
-    /// Cast from a small integer that can be represented exactly.  Panic if the integer can't be
+    /// Casts from a small integer that can be represented exactly. Panic if the integer can't be
     /// represented, the other code in this module makes sure to never let that happen.
     fn from_int(x: u64) -> Self;
 
-    /// Get the value 10<sup>e</sup> from a pre-computed table.
+    /// Gets the value 10<sup>e</sup> from a pre-computed table.
     /// Panics for `e >= CEIL_LOG5_OF_MAX_SIG`.
     fn short_fast_pow10(e: usize) -> Self;
 
@@ -154,7 +139,7 @@ macro_rules! other_constants {
         const INFINITY: Self = $crate::$type::INFINITY;
         const NAN: Self = $crate::$type::NAN;
         const ZERO: Self = 0.0;
-    }
+    };
 }
 
 impl RawFloat for f32 {
@@ -173,11 +158,8 @@ impl RawFloat for f32 {
         let bits = self.to_bits();
         let sign: i8 = if bits >> 31 == 0 { 1 } else { -1 };
         let mut exponent: i16 = ((bits >> 23) & 0xff) as i16;
-        let mantissa = if exponent == 0 {
-            (bits & 0x7fffff) << 1
-        } else {
-            (bits & 0x7fffff) | 0x800000
-        };
+        let mantissa =
+            if exponent == 0 { (bits & 0x7fffff) << 1 } else { (bits & 0x7fffff) | 0x800000 };
         // Exponent bias + mantissa shift
         exponent -= 127 + 23;
         (mantissa as u64, exponent, sign)
@@ -198,11 +180,16 @@ impl RawFloat for f32 {
         table::F32_SHORT_POWERS[e]
     }
 
-    fn classify(self) -> FpCategory { self.classify() }
-    fn to_bits(self) -> Self::Bits { self.to_bits() }
-    fn from_bits(v: Self::Bits) -> Self { Self::from_bits(v) }
+    fn classify(self) -> FpCategory {
+        self.classify()
+    }
+    fn to_bits(self) -> Self::Bits {
+        self.to_bits()
+    }
+    fn from_bits(v: Self::Bits) -> Self {
+        Self::from_bits(v)
+    }
 }
-
 
 impl RawFloat for f64 {
     type Bits = u64;
@@ -245,12 +232,18 @@ impl RawFloat for f64 {
         table::F64_SHORT_POWERS[e]
     }
 
-    fn classify(self) -> FpCategory { self.classify() }
-    fn to_bits(self) -> Self::Bits { self.to_bits() }
-    fn from_bits(v: Self::Bits) -> Self { Self::from_bits(v) }
+    fn classify(self) -> FpCategory {
+        self.classify()
+    }
+    fn to_bits(self) -> Self::Bits {
+        self.to_bits()
+    }
+    fn from_bits(v: Self::Bits) -> Self {
+        Self::from_bits(v)
+    }
 }
 
-/// Convert an Fp to the closest machine float type.
+/// Converts an `Fp` to the closest machine float type.
 /// Does not handle subnormal results.
 pub fn fp_to_float<T: RawFloat>(x: Fp) -> T {
     let x = x.normalize();
@@ -258,7 +251,7 @@ pub fn fp_to_float<T: RawFloat>(x: Fp) -> T {
     let e = x.e + 63;
     if e > T::MAX_EXP {
         panic!("fp_to_float: exponent {} too large", e)
-    }  else if e > T::MIN_EXP {
+    } else if e > T::MIN_EXP {
         encode_normal(round_normal::<T>(x))
     } else {
         panic!("fp_to_float: exponent {} too small", e)
@@ -288,14 +281,15 @@ pub fn round_normal<T: RawFloat>(x: Fp) -> Unpacked {
 /// Inverse of `RawFloat::unpack()` for normalized numbers.
 /// Panics if the significand or exponent are not valid for normalized numbers.
 pub fn encode_normal<T: RawFloat>(x: Unpacked) -> T {
-    debug_assert!(T::MIN_SIG <= x.sig && x.sig <= T::MAX_SIG,
-        "encode_normal: significand not normalized");
+    debug_assert!(
+        T::MIN_SIG <= x.sig && x.sig <= T::MAX_SIG,
+        "encode_normal: significand not normalized"
+    );
     // Remove the hidden bit
     let sig_enc = x.sig & !(1 << T::EXPLICIT_SIG_BITS);
     // Adjust the exponent for exponent bias and mantissa shift
     let k_enc = x.k + T::MAX_EXP + T::EXPLICIT_SIG_BITS as i16;
-    debug_assert!(k_enc != 0 && k_enc < T::MAX_ENCODED_EXP,
-        "encode_normal: exponent out of range");
+    debug_assert!(k_enc != 0 && k_enc < T::MAX_ENCODED_EXP, "encode_normal: exponent out of range");
     // Leave sign bit at 0 ("+"), our numbers are all positive
     let bits = (k_enc as u64) << T::EXPLICIT_SIG_BITS | sig_enc;
     T::from_bits(bits.try_into().unwrap_or_else(|_| unreachable!()))
@@ -325,11 +319,11 @@ pub fn big_to_fp(f: &Big) -> Fp {
         Equal | Greater => match leading.checked_add(1) {
             Some(f) => Fp { f, e }.normalize(),
             None => Fp { f: 1 << 63, e: e + 1 },
-        }
+        },
     }
 }
 
-/// Find the largest floating point number strictly smaller than the argument.
+/// Finds the largest floating point number strictly smaller than the argument.
 /// Does not handle subnormals, zero, or exponent underflow.
 pub fn prev_float<T: RawFloat>(x: T) -> T {
     match x.classify() {
@@ -349,7 +343,7 @@ pub fn prev_float<T: RawFloat>(x: T) -> T {
 }
 
 // Find the smallest floating point number strictly larger than the argument.
-// This operation is saturating, i.e. next_float(inf) == inf.
+// This operation is saturating, i.e., next_float(inf) == inf.
 // Unlike most code in this module, this function does handle zero, subnormals, and infinities.
 // However, like all other code here, it does not deal with NaN and negative numbers.
 pub fn next_float<T: RawFloat>(x: T) -> T {
@@ -364,8 +358,6 @@ pub fn next_float<T: RawFloat>(x: T) -> T {
         // want, and the mantissa bits become zero. Because of the hidden bit convention, this
         // too is exactly what we want!
         // Finally, f64::MAX + 1 = 7eff...f + 1 = 7ff0...0 = f64::INFINITY.
-        Zero | Subnormal | Normal => {
-            T::from_bits(x.to_bits() + T::Bits::from(1u8))
-        }
+        Zero | Subnormal | Normal => T::from_bits(x.to_bits() + T::Bits::from(1u8)),
     }
 }
